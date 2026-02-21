@@ -53,6 +53,9 @@ else:
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
+with app.app_context():
+    db.create_all()
+    ensure_admin()
 
 login_manager = LoginManager(app)
 login_manager.login_view = "login_get"
