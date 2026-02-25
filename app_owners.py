@@ -1090,18 +1090,58 @@ def dashboard_finanzas():
           options: {{
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {{
-              legend: {{ position: 'bottom' }},
-              tooltip: {{
-                callbacks: {{
-                  label: function(context) {{
-                    const v = context.raw || 0;
-                    const s = Math.round(v).toString().replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ".");
-                    return `${{context.dataset.label}}: $ ${{s}}`;
-                  }}
-                }}
-              }}
-            }},
+        plugins: {
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        const labels = context.chart.data.labels;
+                        const data = context.chart.data.datasets[0].data;
+
+                        const income = data[0];
+                        const expense = data[1] || 0;
+                        const profit = data[2] || 0;
+
+                        if (context.dataIndex === 0) {
+                            return "100%";
+                        }
+
+                        if (income > 0) {
+                            if (context.dataIndex === 1) {
+                                return ((expense / income) * 100).toFixed(1) + "%";
+                            }
+                            if (context.dataIndex === 2) {
+                                return ((profit / income) * 100).toFixed(1) + "%";
+                            }
+                        }
+
+                        return "0%";
+                    }
+                }
+            },
+            datalabels: {
+                formatter: function(value, context) {
+                    const data = context.chart.data.datasets[0].data;
+                    const income = data[0];
+                    const expense = data[1] || 0;
+                    const profit = data[2] || 0;
+
+                    if (context.dataIndex === 0) {
+                        return "100%";
+                    }
+
+                    if (income > 0) {
+                        if (context.dataIndex === 1) {
+                            return ((expense / income) * 100).toFixed(1) + "%";
+                        }
+                        if (context.dataIndex === 2) {
+                            return ((profit / income) * 100).toFixed(1) + "%";
+                        }
+                    }
+
+                    return "";
+                }
+            }
+        }
             scales: {{
               y: {{ beginAtZero: true }}
             }}
