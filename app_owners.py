@@ -41,20 +41,21 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-change-me")
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
 if DATABASE_URL:
-    # En la nube (Render)
     app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL.replace("postgres://", "postgresql://")
-else:
-    # En local (SQLite)
-    app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI
 
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-# Recomendado para Postgres en nube: evita conexiones "muertas"
-app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    # Robustez en Render/Postgres (evita conexiones muertas tras restart/sleep)
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
     "pool_recycle": 280,
-}
+    "pool_timeout": 30,
+    }
+
+else:
+    app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI  # SQLite local
+
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
