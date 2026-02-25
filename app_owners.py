@@ -123,11 +123,48 @@ def iso(d: date) -> str:
     return d.isoformat()
 
 
-def safe_float(v: str) -> float:
-    v = (v or "").strip()
-    if not v:
+def safe_float(v) -> float:
+    """Convierte strings numéricos estilo AR a float.
+    Soporta: 221223 | 221.223 | 221,223 | 221.223,50 | 221,223.50 | $ 221.223,50
+    """
+    if v is None:
         return 0.0
-    return float(v)
+    if isinstance(v, (int, float)):
+        return float(v)
+
+    s = str(v).strip()
+    if not s:
+        return 0.0
+
+    s = s.replace("$", "").replace(" ", "")
+    s = re.sub(r"[^0-9,\.\-]", "", s)
+    if not s or s in ("-", ",", "."):
+        return 0.0
+
+    if "," in s and "." in s:
+        if s.rfind(".") > s.rfind(","):
+            # 1,234.56 -> coma miles, punto decimal
+            s = s.replace(",", "")
+        else:
+            # 1.234,56 -> punto miles, coma decimal
+            s = s.replace(".", "").replace(",", ".")
+        return float(s)
+
+    if "," in s:
+        # miles: 1,234,567
+        if re.match(r"^-?\d{1,3}(,\d{3})+$", s):
+            return float(s.replace(",", ""))
+        # decimal: 123,45
+        return float(s.replace(",", "."))
+
+    if "." in s:
+        # miles: 1.234.567
+        if re.match(r"^-?\d{1,3}(\.\d{3})+$", s):
+            return float(s.replace(".", ""))
+        return float(s)
+
+    return float(s)
+
 
 
 # ----------------------------
@@ -689,7 +726,17 @@ def dashboard_finanzas():
     bucket_label, bucket_class = margin_bucket(margen_periodo)
     promedio_diario = (income / len(series)) if series else 0.0
 
-    sueldo_ximena = 0
+    # Sueldo Ximena (gasto fijo) en el rango seleccionado
+    sueldo_ximena = (
+        db.session.query(func.coalesce(func.sum(ExpenseEntry.amount), 0.0))
+        .join(ExpenseCategory, ExpenseCategory.id == ExpenseEntry.category_id)
+        .join(BusinessDay, BusinessDay.id == ExpenseEntry.business_day_id)
+        .filter(BusinessDay.day >= d1, BusinessDay.day <= d2)
+        .filter(ExpenseEntry.kind == "fixed")
+        .filter(func.lower(ExpenseCategory.name) == "sueldo ximena")
+        .scalar()
+        or 0.0
+    )
 
     existing_days = {parse_ymd(x["date"]) for x in series}
     missing_days = [d for d in iter_workdays(d1, d2) if d not in existing_days]
@@ -879,7 +926,7 @@ def dashboard_finanzas():
       <div class="card kpi">
         <div class="label">Sueldo Ximena</div>
         <div class="value">{ars(sueldo_ximena)}</div>
-        <div class="muted">Placeholder</div>
+        <div class="muted">Gasto fijo en el rango seleccionado</div>
       </div>
     </div>
 
@@ -1143,8 +1190,9 @@ def io_dashboard():
             }
         )
 
-    avg_week_income = (sum(r["income"] for r in weekly_rows) / len(weekly_rows)) if weekly_rows else 0.0
+        avg_week_income = (sum(r["income"] for r in weekly_rows) / len(weekly_rows)) if weekly_rows else 0.0
     avg_week_expense = (sum(r["expense"] for r in weekly_rows) / len(weekly_rows)) if weekly_rows else 0.0
+    avg_week_profit = (sum(r["profit"] for r in weekly_rows) / len(weekly_rows)) if weekly_rows else 0.0
 
     # promedio mensual dentro del rango
     monthly = {}
@@ -1177,13 +1225,40 @@ def io_dashboard():
         .all()
     )
 
-    cat_table = ""
+    def _cat_row_html(r):
+        kind = "Fijo" if r.kind == "fixed" else "Variable"
+        return f"<tr><td>{kind}</td><td>{r.name}</td><td class='num'>{ars(r.total)}</td></tr>"
+
     if not cat_rows:
-        cat_table = "<tr><td colspan='3' class='muted'>No hay gastos por categorías en este rango (si venís de Excel, todavía no cargaste detalles por categoría).</td></tr>"
+        cat_rank_html = (
+            "<div class='muted'>"
+            "No hay gastos por categorías en este rango (si venís de Excel, todavía no cargaste detalles por categoría)."
+            "</div>"
+        )
     else:
-        for r in cat_rows[:25]:
-            kind = "Fijo" if r.kind == "fixed" else "Variable"
-            cat_table += f"<tr><td>{kind}</td><td>{r.name}</td><td class='num'>{ars(r.total)}</td></tr>"
+        top = cat_rows[:3]
+        rest = cat_rows[3:50]
+
+        top_html = "".join(_cat_row_html(r) for r in top)
+        rest_html = "".join(_cat_row_html(r) for r in rest)
+
+        cat_rank_html = """
+        <table>
+          <thead><tr><th>Tipo</th><th>Categoría</th><th class='num'>Total</th></tr></thead>
+          <tbody>{top_html}</tbody>
+        </table>
+        """.format(top_html=top_html)
+
+        if rest:
+            cat_rank_html += """
+            <details style="margin-top:10px;">
+              <summary>Ver más</summary>
+              <table style="margin-top:10px;">
+                <thead><tr><th>Tipo</th><th>Categoría</th><th class='num'>Total</th></tr></thead>
+                <tbody>{rest_html}</tbody>
+              </table>
+            </details>
+            """.format(rest_html=rest_html)
 
     # trazabilidad mensual por categoría (Top 6)
     top_cats = [(r.kind, r.name) for r in cat_rows[:6]]
@@ -1373,9 +1448,9 @@ def io_dashboard():
         <div class="value">{ars(avg_week_expense)}</div>
       </div>
       <div class="card kpi">
-        <div class="label">Promedio mensual (ingresos)</div>
-        <div class="value">{ars(avg_month_income)}</div>
-        <div class="muted">En el rango seleccionado</div>
+        <div class="label">Promedio semanal (ganancia)</div>
+        <div class="value">{ars(avg_week_profit)}</div>
+        <div class="muted">En semanas con data</div>
       </div>
     </div>
 
@@ -1420,10 +1495,7 @@ def io_dashboard():
 
       <div class="card">
         <h3>Ranking de categorías (gastos)</h3>
-        <table>
-          <thead><tr><th>Tipo</th><th>Categoría</th><th class="num">Total</th></tr></thead>
-          <tbody>{cat_table}</tbody>
-        </table>
+        {cat_rank_html}
         <p class="muted" style="margin-top:10px;">
           Nota: solo aparece si cargaste gastos con categorías (no alcanza con el Excel legacy).
         </p>
@@ -1919,7 +1991,7 @@ def edit_day(day):
 
     <div class="grid">
       <div class="card">
-        <h3>Gastos Variables</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;"><h3 style="margin:0;">Gastos Variables</h3><a class="btn" href="/categories/manage?kind=variable&day={bday.day}">Editar categorías</a></div>
 
         <form method="post" action="/categories/add" class="inline" style="margin-bottom:10px;">
           <input type="hidden" name="day" value="{bday.day}" />
@@ -1964,7 +2036,7 @@ def edit_day(day):
       </div>
 
       <div class="card">
-        <h3>Gastos Fijos</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;"><h3 style="margin:0;">Gastos Fijos</h3><a class="btn" href="/categories/manage?kind=fixed&day={bday.day}">Editar categorías</a></div>
 
         <form method="post" action="/categories/add" class="inline" style="margin-bottom:10px;">
           <input type="hidden" name="day" value="{bday.day}" />
@@ -2099,6 +2171,143 @@ def add_category():
     return redirect(url_for("dashboard_finanzas"))
 
 
+
+# ----------------------------
+# Categorías (Administración)
+# ----------------------------
+@app.get("/categories/manage")
+@login_required
+def manage_categories():
+    kind = (request.args.get("kind") or "").strip().lower()
+    day = (request.args.get("day") or "").strip()
+
+    if kind not in ("fixed", "variable"):
+        flash("Tipo de categoría inválido.", "error")
+        return redirect(url_for("dashboard_finanzas"))
+
+    cats = ExpenseCategory.query.filter_by(kind=kind).order_by(ExpenseCategory.name.asc()).all()
+
+    # Conteo de uso por categoría (para no borrar si está en uso)
+    counts = dict(
+        db.session.query(ExpenseEntry.category_id, func.count(ExpenseEntry.id))
+        .group_by(ExpenseEntry.category_id)
+        .all()
+    )
+
+    kind_label = "Fijas" if kind == "fixed" else "Variables"
+
+    rows = ""
+    for c in cats:
+        used = int(counts.get(c.id, 0))
+        disabled = "disabled" if used > 0 else ""
+        disabled_class = "disabled" if used > 0 else ""
+        rows += f"""
+        <tr>
+          <td style="width:40%;">
+            <form method="post" action="/categories/{c.id}/rename" class="inline" style="margin:0;">
+              <input type="hidden" name="kind" value="{kind}" />
+              <input type="hidden" name="day" value="{day}" />
+              <div class="field" style="min-width:260px;">
+                <input name="name" value="{c.name}" />
+              </div>
+              <div style="min-width:140px;">
+                <button class="btn" type="submit" style="width:100%;">Guardar</button>
+              </div>
+            </form>
+          </td>
+          <td class="num" style="width:10%;">{used}</td>
+          <td class="num" style="width:20%;">
+            <form method="post" action="/categories/{c.id}/delete" style="margin:0;">
+              <input type="hidden" name="kind" value="{kind}" />
+              <input type="hidden" name="day" value="{day}" />
+              <button class="btn {disabled_class}" type="submit" {disabled}>Borrar</button>
+            </form>
+          </td>
+        </tr>
+        """
+
+    if not rows:
+        rows = "<tr><td colspan='3' class='muted'>No hay categorías cargadas.</td></tr>"
+
+    back_url = url_for("edit_day", day=day) if day else url_for("dashboard_finanzas")
+
+    body = f"""
+    <h1>Categorías {kind_label}</h1>
+    <p class="muted">Podés renombrar. Borrar solo si no tiene gastos asociados (Uso = 0).</p>
+
+    <div class="card">
+      <a class="btn" href="{back_url}">Volver</a>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead><tr><th>Nombre</th><th class="num">Uso</th><th class="num">Acción</th></tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>
+    """
+    return render_page(body, show_nav=True)
+
+
+@app.post("/categories/<int:cid>/rename")
+@login_required
+def rename_category(cid):
+    kind = (request.form.get("kind") or "").strip().lower()
+    day = (request.form.get("day") or "").strip()
+    name = (request.form.get("name") or "").strip()
+
+    c = db.session.get(ExpenseCategory, cid)
+    if not c:
+        flash("Categoría no encontrada.", "error")
+        return redirect(url_for("manage_categories", kind=kind, day=day))
+
+    if kind not in ("fixed", "variable"):
+        kind = c.kind
+
+    if not name:
+        flash("El nombre no puede estar vacío.", "error")
+        return redirect(url_for("manage_categories", kind=kind, day=day))
+
+    clean = re.sub(r"\s+", " ", name).strip()
+
+    exists = ExpenseCategory.query.filter_by(kind=c.kind, name=clean).first()
+    if exists and exists.id != c.id:
+        flash("Ya existe una categoría con ese nombre.", "error")
+        return redirect(url_for("manage_categories", kind=c.kind, day=day))
+
+    c.name = clean
+    db.session.commit()
+    flash("Categoría actualizada.", "ok")
+    return redirect(url_for("manage_categories", kind=c.kind, day=day))
+
+
+@app.post("/categories/<int:cid>/delete")
+@login_required
+def delete_category(cid):
+    kind = (request.form.get("kind") or "").strip().lower()
+    day = (request.form.get("day") or "").strip()
+
+    c = db.session.get(ExpenseCategory, cid)
+    if not c:
+        flash("Categoría no encontrada.", "error")
+        return redirect(url_for("manage_categories", kind=kind, day=day))
+
+    used = (
+        db.session.query(func.count(ExpenseEntry.id))
+        .filter(ExpenseEntry.category_id == c.id)
+        .scalar()
+        or 0
+    )
+    if used > 0:
+        flash("No se puede borrar: la categoría tiene gastos asociados.", "error")
+        return redirect(url_for("manage_categories", kind=c.kind, day=day))
+
+    db.session.delete(c)
+    db.session.commit()
+    flash("Categoría borrada.", "ok")
+    return redirect(url_for("manage_categories", kind=c.kind, day=day))
+
+
 @app.post("/days/<day>/expense/add")
 @login_required
 def add_expense(day):
@@ -2129,7 +2338,7 @@ def add_expense(day):
         return redirect(url_for("edit_day", day=day))
 
     try:
-        amount = float(amt) if amt else 0.0
+        amount = safe_float(amt) if amt else 0.0
     except ValueError:
         flash("Monto inválido.", "error")
         return redirect(url_for("edit_day", day=day))
