@@ -842,19 +842,24 @@ def dashboard_finanzas():
             )
         alerts_html += "</ul>"
 
-    # Pie: Ingresos = 100% (se descompone en Gastos + Ganancia)
+# Pie "didáctico":
+# - Ingreso ocupa SIEMPRE 50% visual
+# - La otra mitad se reparte según % sobre ingresos (gastos vs ganancia)
     if income > 0:
+        exp_ratio = max(expense, 0) / income  # ej 0.76
         if profit >= 0:
-            pie_labels = ["Gastos", "Ganancia"]
-            pie_values = [max(expense, 0), max(profit, 0)]  # suma = income
+            prof_ratio = max(profit, 0) / income  # ej 0.24
+            pie_labels = ["Ingresos", "Gastos", "Ganancia"]
+            pie_values = [1.0, exp_ratio, prof_ratio]  # total = 2 -> ingresos = 50%
         else:
-            # Caso pérdida: Gastos superan ingresos (la suma supera 100%). Lo mostramos como:
-            # "Gastos (hasta ingresos)" = ingresos, y "Déficit" = pérdida absoluta.
-            pie_labels = ["Gastos (hasta ingresos)", "Déficit"]
-            pie_values = [max(income, 0), abs(profit)]
+            # Caso pérdida: no puede "entrar" en la mitad sin pasar 100%.
+            # Lo mostramos como Ingresos 50% y el resto como Gastos (100% de la otra mitad),
+            # y reportamos el déficit en texto/tabla (si querés, lo hacemos después).
+            pie_labels = ["Ingresos", "Gastos"]
+            pie_values = [1.0, 1.0]
     else:
-        pie_labels = ["Gastos", "Ganancia"]
-        pie_values = [0, 0]
+        pie_labels = ["Ingresos", "Gastos", "Ganancia"]
+        pie_values = [0.0, 0.0, 0.0]
     
     charts_payload = {
         "bar": {"labels": bar_labels, "income": bar_income, "expense": bar_expense, "profit": bar_profit},
