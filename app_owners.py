@@ -846,20 +846,25 @@ def dashboard_finanzas():
     # - En números, Ingresos es el 100%.
     # - Gráficamente, mostramos "Ingresos" ocupando el 50% del gráfico.
     #   El otro 50% se reparte entre Gastos y Ganancia según su % sobre Ingresos.
-    if income and income > 0 and profit >= 0:
-        exp_ratio = max(expense, 0) / income
-        prof_ratio = max(profit, 0) / income  # margen
-        # exp_ratio + prof_ratio = 1 (salvo redondeos)
+    # =========================
+    # PIE CHART (Ingreso = 100%)
+    # =========================
+
+    if income > 0:
+        # Porcentajes reales sobre ingresos
+        expense_pct_real = (expense / income) * 100
+        profit_pct_real = (profit / income) * 100
+
         pie_labels = ["Ingresos", "Gastos", "Ganancia"]
-        pie_values = [1.0, exp_ratio, prof_ratio]  # Ingresos = 50% (porque total = 2)
-    elif income and income > 0 and profit < 0:
-        # Caso pérdida: mantenemos Ingresos como 50% y mostramos Gastos como 50%.
-        # (El déficit se ve en el margen negativo / tablas.)
-        pie_labels = ["Ingresos", "Gastos"]
-        pie_values = [1.0, 1.0]
+
+        pie_values = [
+            100,                         # Ingreso hardcodeado a 100%
+            max(expense_pct_real, 0),    # Ej: 76%
+            max(profit_pct_real, 0)      # Ej: 24%
+        ]
     else:
         pie_labels = ["Ingresos", "Gastos", "Ganancia"]
-        pie_values = [0.0, 0.0, 0.0]
+        pie_values = [0, 0, 0]
     charts_payload = {
         "bar": {"labels": bar_labels, "income": bar_income, "expense": bar_expense, "profit": bar_profit},
         "pie": {"labels": pie_labels, "values": pie_values},
