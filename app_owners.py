@@ -842,13 +842,20 @@ def dashboard_finanzas():
             )
         alerts_html += "</ul>"
 
-    pie_labels = ["Ingresos", "Gastos", "Ganancias"] if profit >= 0 else ["Ingresos", "Gastos", "Pérdida"]
-    pie_values = (
-        [max(income, 0), max(expense, 0), max(profit, 0)]
-        if profit >= 0
-        else [max(income, 0), max(expense, 0), abs(min(profit, 0))]
-    )
-
+    # Pie: Ingresos = 100% (se descompone en Gastos + Ganancia)
+    if income > 0:
+    if profit >= 0:
+        pie_labels = ["Gastos", "Ganancia"]
+        pie_values = [max(expense, 0), max(profit, 0)]  # suma = income
+    else:
+        # Caso pérdida: Gastos superan ingresos (la suma supera 100%). Lo mostramos como:
+        # "Gastos (hasta ingresos)" = ingresos, y "Déficit" = pérdida absoluta.
+        pie_labels = ["Gastos (hasta ingresos)", "Déficit"]
+        pie_values = [max(income, 0), abs(profit)]
+    else:
+    pie_labels = ["Gastos", "Ganancia"]
+    pie_values = [0, 0]
+    
     charts_payload = {
         "bar": {"labels": bar_labels, "income": bar_income, "expense": bar_expense, "profit": bar_profit},
         "pie": {"labels": pie_labels, "values": pie_values},
