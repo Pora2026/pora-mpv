@@ -39,10 +39,8 @@ DATABASE_URI = "sqlite:///" + DB_PATH
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-change-me")
-import os
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-
 if DATABASE_URL:
     # En la nube (Render)
     app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL.replace("postgres://", "postgresql://")
@@ -51,6 +49,12 @@ else:
     app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# Recomendado para Postgres en nube: evita conexiones "muertas"
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_pre_ping": True,
+    "pool_recycle": 280,
+}
 
 db = SQLAlchemy(app)
 
@@ -119,11 +123,48 @@ def iso(d: date) -> str:
     return d.isoformat()
 
 
-def safe_float(v: str) -> float:
-    v = (v or "").strip()
-    if not v:
+def safe_float(v) -> float:
+    """Convierte strings numéricos estilo AR a float.
+    Soporta: 221223 | 221.223 | 221,223 | 221.223,50 | 221,223.50 | $ 221.223,50
+    """
+    if v is None:
         return 0.0
-    return float(v)
+    if isinstance(v, (int, float)):
+        return float(v)
+
+    s = str(v).strip()
+    if not s:
+        return 0.0
+
+    s = s.replace("$", "").replace(" ", "")
+    s = re.sub(r"[^0-9,\.\-]", "", s)
+    if not s or s in ("-", ",", "."):
+        return 0.0
+
+    if "," in s and "." in s:
+        if s.rfind(".") > s.rfind(","):
+            # 1,234.56 -> coma miles, punto decimal
+            s = s.replace(",", "")
+        else:
+            # 1.234,56 -> punto miles, coma decimal
+            s = s.replace(".", "").replace(",", ".")
+        return float(s)
+
+    if "," in s:
+        # miles: 1,234,567
+        if re.match(r"^-?\d{1,3}(,\d{3})+$", s):
+            return float(s.replace(",", ""))
+        # decimal: 123,45
+        return float(s.replace(",", "."))
+
+    if "." in s:
+        # miles: 1.234.567
+        if re.match(r"^-?\d{1,3}(\.\d{3})+$", s):
+            return float(s.replace(".", ""))
+        return float(s)
+
+    return float(s)
+
 
 
 # ----------------------------
@@ -268,8 +309,12 @@ def range_series(d1: date, d2: date):
         db.session.query(
             ExpenseEntry.business_day_id.label("bdid"),
             func.count(ExpenseEntry.id).label("cnt"),
-            func.coalesce(func.sum(case((ExpenseEntry.kind == "variable", ExpenseEntry.amount), else_=0.0)), 0.0).label("var_cat"),
-            func.coalesce(func.sum(case((ExpenseEntry.kind == "fixed", ExpenseEntry.amount), else_=0.0)), 0.0).label("fix_cat"),
+            func.coalesce(
+                func.sum(case((ExpenseEntry.kind == "variable", ExpenseEntry.amount), else_=0.0)), 0.0
+            ).label("var_cat"),
+            func.coalesce(
+                func.sum(case((ExpenseEntry.kind == "fixed", ExpenseEntry.amount), else_=0.0)), 0.0
+            ).label("fix_cat"),
         )
         .group_by(ExpenseEntry.business_day_id)
         .subquery()
@@ -290,8 +335,14 @@ def range_series(d1: date, d2: date):
         db.session.query(
             BusinessDay.day.label("day"),
             func.coalesce(sh_sub.c.income, 0.0).label("income"),
-            case((func.coalesce(exp_sub.c.cnt, 0) > 0, exp_sub.c.var_cat), else_=func.coalesce(sh_sub.c.var_sh, 0.0)).label("var_exp"),
-            case((func.coalesce(exp_sub.c.cnt, 0) > 0, exp_sub.c.fix_cat), else_=func.coalesce(sh_sub.c.fix_sh, 0.0)).label("fix_exp"),
+            case(
+                (func.coalesce(exp_sub.c.cnt, 0) > 0, exp_sub.c.var_cat),
+                else_=func.coalesce(sh_sub.c.var_sh, 0.0),
+            ).label("var_exp"),
+            case(
+                (func.coalesce(exp_sub.c.cnt, 0) > 0, exp_sub.c.fix_cat),
+                else_=func.coalesce(sh_sub.c.fix_sh, 0.0),
+            ).label("fix_exp"),
         )
         .outerjoin(sh_sub, sh_sub.c.bdid == BusinessDay.id)
         .outerjoin(exp_sub, exp_sub.c.bdid == BusinessDay.id)
@@ -641,7 +692,7 @@ def home():
 
 
 # ----------------------------
-# Dashboard Finanzas (igual que venías)
+# Dashboard Finanzas
 # ----------------------------
 @app.get("/finanzas")
 @login_required
@@ -675,12 +726,21 @@ def dashboard_finanzas():
     bucket_label, bucket_class = margin_bucket(margen_periodo)
     promedio_diario = (income / len(series)) if series else 0.0
 
-    sueldo_ximena = 0
+    # Sueldo Ximena (gasto fijo) en el rango seleccionado
+    sueldo_ximena = (
+        db.session.query(func.coalesce(func.sum(ExpenseEntry.amount), 0.0))
+        .join(ExpenseCategory, ExpenseCategory.id == ExpenseEntry.category_id)
+        .join(BusinessDay, BusinessDay.id == ExpenseEntry.business_day_id)
+        .filter(BusinessDay.day >= d1, BusinessDay.day <= d2)
+        .filter(ExpenseEntry.kind == "fixed")
+        .filter(func.lower(ExpenseCategory.name) == "sueldo ximena")
+        .scalar()
+        or 0.0
+    )
 
     existing_days = {parse_ymd(x["date"]) for x in series}
     missing_days = [d for d in iter_workdays(d1, d2) if d not in existing_days]
 
-    # gráficos
     bar_labels, bar_income, bar_expense, bar_profit = [], [], [], []
     ranked = []
     for x in series:
@@ -741,13 +801,13 @@ def dashboard_finanzas():
         if not items:
             return "<tr><td colspan='3' class='muted'>Sin datos</td></tr>"
         out = ""
-        for r in items:
-            cls = "neg" if r["profit"] < 0 else ""
+        for rr in items:
+            cls = "neg" if rr["profit"] < 0 else ""
             out += (
                 "<tr>"
-                f"<td>{r['date_ar']}</td>"
-                f"<td class='num'>{ars(r['income'])}</td>"
-                f"<td class='num {cls}'>{ars(r['profit'])}</td>"
+                f"<td>{rr['date_ar']}</td>"
+                f"<td class='num'>{ars(rr['income'])}</td>"
+                f"<td class='num {cls}'>{ars(rr['profit'])}</td>"
                 "</tr>"
             )
         return out
@@ -756,15 +816,15 @@ def dashboard_finanzas():
     worst_html = rank_rows(worst3)
 
     rows_html = ""
-    for r in ranked:
-        mlabel, mclass = margin_bucket(r["margin"])
-        profit_cls = "neg" if r["profit"] < 0 else ""
+    for rr in ranked:
+        mlabel, mclass = margin_bucket(rr["margin"])
+        profit_cls = "neg" if rr["profit"] < 0 else ""
         rows_html += (
             "<tr>"
-            f"<td><a href='/days/{r['date_iso']}'>{r['date_ar']}</a></td>"
-            f"<td class='num'>{ars(r['income'])}</td>"
-            f"<td class='num'>{ars(r['expense'])}</td>"
-            f"<td class='num {profit_cls}'>{ars(r['profit'])}</td>"
+            f"<td><a href='/days/{rr['date_iso']}'>{rr['date_ar']}</a></td>"
+            f"<td class='num'>{ars(rr['income'])}</td>"
+            f"<td class='num'>{ars(rr['expense'])}</td>"
+            f"<td class='num {profit_cls}'>{ars(rr['profit'])}</td>"
             f"<td class='num'><span class='{mclass}'>{mlabel}</span></td>"
             "</tr>"
         )
@@ -782,18 +842,30 @@ def dashboard_finanzas():
             )
         alerts_html += "</ul>"
 
-    pie_labels = ["Ingresos", "Gastos", "Ganancias"] if profit >= 0 else ["Ingresos", "Gastos", "Pérdida"]
-    pie_values = [max(income, 0), max(expense, 0), max(profit, 0)] if profit >= 0 else [
-        max(income, 0), max(expense, 0), abs(min(profit, 0))
-    ]
-
+    # Torta del período:
+    # - En números, Ingresos es el 100%.
+    # - Gráficamente, mostramos "Ingresos" ocupando el 50% del gráfico.
+    #   El otro 50% se reparte entre Gastos y Ganancia según su % sobre Ingresos.
+    if income and income > 0 and profit >= 0:
+        exp_ratio = max(expense, 0) / income
+        prof_ratio = max(profit, 0) / income  # margen
+        # exp_ratio + prof_ratio = 1 (salvo redondeos)
+        pie_labels = ["Ingresos", "Gastos", "Ganancia"]
+        pie_values = [1.0, exp_ratio, prof_ratio]  # Ingresos = 50% (porque total = 2)
+    elif income and income > 0 and profit < 0:
+        # Caso pérdida: mantenemos Ingresos como 50% y mostramos Gastos como 50%.
+        # (El déficit se ve en el margen negativo / tablas.)
+        pie_labels = ["Ingresos", "Gastos"]
+        pie_values = [1.0, 1.0]
+    else:
+        pie_labels = ["Ingresos", "Gastos", "Ganancia"]
+        pie_values = [0.0, 0.0, 0.0]
     charts_payload = {
         "bar": {"labels": bar_labels, "income": bar_income, "expense": bar_expense, "profit": bar_profit},
         "pie": {"labels": pie_labels, "values": pie_values},
     }
     charts_json = json.dumps(charts_payload, ensure_ascii=False)
 
-    # dropdown faltantes
     if missing_days:
         options_html = "".join(f"<option value='{iso(d)}'>{fmt_date_ar(d)}</option>" for d in missing_days)
     else:
@@ -865,7 +937,7 @@ def dashboard_finanzas():
       <div class="card kpi">
         <div class="label">Sueldo Ximena</div>
         <div class="value">{ars(sueldo_ximena)}</div>
-        <div class="muted">Placeholder</div>
+        <div class="muted">Gasto fijo en el rango seleccionado</div>
       </div>
     </div>
 
@@ -945,7 +1017,6 @@ def dashboard_finanzas():
           const dataset = chart.data.datasets[0];
           const meta = chart.getDatasetMeta(0);
           const data = dataset.data || [];
-          const incomeBase = Number(data[0] || 0);
           const total = data.reduce((a,b)=>a + (Number(b)||0), 0) || 1;
 
           ctx.save();
@@ -957,14 +1028,8 @@ def dashboard_finanzas():
           meta.data.forEach((arc, i) => {{
             const v = Number(data[i] || 0);
             if (!v) return;
-            let label;
-            if (incomeBase > 0) {{
-              if (i === 0) label = '100.0%';
-              else label = ((v / incomeBase) * 100).toFixed(1) + '%';
-            }} else {{
-              const pct = (v / total) * 100;
-              label = pct.toFixed(1) + '%';
-            }}
+            const pct = (v / total) * 100;
+            const label = pct.toFixed(1) + '%';
 
             const angle = (arc.startAngle + arc.endAngle) / 2;
             const r = arc.outerRadius * 0.70;
@@ -1111,7 +1176,6 @@ def io_dashboard():
         d1, d2 = d2, d1
         d1s, d2s = iso(d1), iso(d2)
 
-    # rango principal
     series = range_series(d1, d2)
     income = sum(x["income"] for x in series)
     expense = sum(x["expense_total"] for x in series)
@@ -1121,20 +1185,27 @@ def io_dashboard():
     weekly = {}
     for x in series:
         d = parse_ymd(x["date"])
-        # (ISO week-year, week number)
-        yw = d.isocalendar()[:2]
+        yw = d.isocalendar()[:2]  # (year, week)
         weekly.setdefault(yw, {"income": 0.0, "expense": 0.0})
         weekly[yw]["income"] += x["income"]
         weekly[yw]["expense"] += x["expense_total"]
 
     weekly_rows = []
     for (y, w), v in sorted(weekly.items()):
-        weekly_rows.append({"label": f"{y}-W{w:02d}", "income": v["income"], "expense": v["expense"], "profit": v["income"] - v["expense"]})
+        weekly_rows.append(
+            {
+                "label": f"{y}-W{w:02d}",
+                "income": v["income"],
+                "expense": v["expense"],
+                "profit": v["income"] - v["expense"],
+            }
+        )
 
-    avg_week_income = (sum(r["income"] for r in weekly_rows) / len(weekly_rows)) if weekly_rows else 0.0
+        avg_week_income = (sum(r["income"] for r in weekly_rows) / len(weekly_rows)) if weekly_rows else 0.0
     avg_week_expense = (sum(r["expense"] for r in weekly_rows) / len(weekly_rows)) if weekly_rows else 0.0
+    avg_week_profit = (sum(r["profit"] for r in weekly_rows) / len(weekly_rows)) if weekly_rows else 0.0
 
-    # promedio mensual dentro del rango: agrupación por (YYYY-MM)
+    # promedio mensual dentro del rango
     monthly = {}
     for x in series:
         d = parse_ymd(x["date"])
@@ -1143,11 +1214,14 @@ def io_dashboard():
         monthly[key]["income"] += x["income"]
         monthly[key]["expense"] += x["expense_total"]
 
-    monthly_rows = [{"label": k, "income": v["income"], "expense": v["expense"], "profit": v["income"] - v["expense"]} for k, v in sorted(monthly.items())]
+    monthly_rows = [
+        {"label": k, "income": v["income"], "expense": v["expense"], "profit": v["income"] - v["expense"]}
+        for k, v in sorted(monthly.items())
+    ]
     avg_month_income = (sum(r["income"] for r in monthly_rows) / len(monthly_rows)) if monthly_rows else 0.0
     avg_month_expense = (sum(r["expense"] for r in monthly_rows) / len(monthly_rows)) if monthly_rows else 0.0
 
-    # gastos por categoría (solo ExpenseEntry, si no hay entries en el rango, queda vacío)
+    # gastos por categoría (solo ExpenseEntry)
     cat_rows = (
         db.session.query(
             ExpenseCategory.kind,
@@ -1157,26 +1231,51 @@ def io_dashboard():
         .join(ExpenseEntry, ExpenseEntry.category_id == ExpenseCategory.id)
         .join(BusinessDay, BusinessDay.id == ExpenseEntry.business_day_id)
         .filter(BusinessDay.day >= d1, BusinessDay.day <= d2)
-        .filter(BusinessDay.day != None)
         .group_by(ExpenseCategory.kind, ExpenseCategory.name)
         .order_by(func.sum(ExpenseEntry.amount).desc())
         .all()
     )
 
-    cat_table = ""
-    if not cat_rows:
-        cat_table = "<tr><td colspan='3' class='muted'>No hay gastos por categorías en este rango (si venís de Excel, todavía no cargaste detalles por categoría).</td></tr>"
-    else:
-        for r in cat_rows[:25]:
-            kind = "Fijo" if r.kind == "fixed" else "Variable"
-            cat_table += f"<tr><td>{kind}</td><td>{r.name}</td><td class='num'>{ars(r.total)}</td></tr>"
+    def _cat_row_html(r):
+        kind = "Fijo" if r.kind == "fixed" else "Variable"
+        return f"<tr><td>{kind}</td><td>{r.name}</td><td class='num'>{ars(r.total)}</td></tr>"
 
-    # trazabilidad mensual por categoría (Top 6 categorías del rango)
-        # trazabilidad mensual por categoría (Top 6 categorías del rango)
+    if not cat_rows:
+        cat_rank_html = (
+            "<div class='muted'>"
+            "No hay gastos por categorías en este rango (si venís de Excel, todavía no cargaste detalles por categoría)."
+            "</div>"
+        )
+    else:
+        top = cat_rows[:3]
+        rest = cat_rows[3:50]
+
+        top_html = "".join(_cat_row_html(r) for r in top)
+        rest_html = "".join(_cat_row_html(r) for r in rest)
+
+        cat_rank_html = """
+        <table>
+          <thead><tr><th>Tipo</th><th>Categoría</th><th class='num'>Total</th></tr></thead>
+          <tbody>{top_html}</tbody>
+        </table>
+        """.format(top_html=top_html)
+
+        if rest:
+            cat_rank_html += """
+            <details style="margin-top:10px;">
+              <summary>Ver más</summary>
+              <table style="margin-top:10px;">
+                <thead><tr><th>Tipo</th><th>Categoría</th><th class='num'>Total</th></tr></thead>
+                <tbody>{rest_html}</tbody>
+              </table>
+            </details>
+            """.format(rest_html=rest_html)
+
+    # trazabilidad mensual por categoría (Top 6)
     top_cats = [(r.kind, r.name) for r in cat_rows[:6]]
     trace = {}  # month -> {catName: total}
 
-    # SQLite-friendly: buscamos los IDs de las categorías top sin tuple_()
+    # buscamos IDs sin tuple_()
     top_cat_objs = []
     for kind, name in top_cats:
         c = ExpenseCategory.query.filter_by(kind=kind, name=name).first()
@@ -1186,23 +1285,32 @@ def io_dashboard():
     top_cat_ids = [c.id for c in top_cat_objs]
     top_cat_names = {c.id: c.name for c in top_cat_objs}
 
+    # Expresión "YYYY-MM" compatible con Postgres y SQLite
+    dialect = db.engine.dialect.name  # "postgresql" o "sqlite"
+    if dialect == "postgresql":
+        ym_expr = func.to_char(BusinessDay.day, "YYYY-MM")
+    else:
+        ym_expr = func.strftime("%Y-%m", BusinessDay.day)
+
+    rows_tr = []
     if top_cat_ids:
         rows_tr = (
             db.session.query(
-                func.strftime("%Y-%m", BusinessDay.day).label("ym"),
+                ym_expr.label("ym"),
                 ExpenseEntry.category_id,
                 func.coalesce(func.sum(ExpenseEntry.amount), 0.0).label("total"),
             )
             .join(BusinessDay, BusinessDay.id == ExpenseEntry.business_day_id)
             .filter(BusinessDay.day >= d1, BusinessDay.day <= d2)
             .filter(ExpenseEntry.category_id.in_(top_cat_ids))
-            .group_by("ym", ExpenseEntry.category_id)
-            .order_by("ym")
+            .group_by(ym_expr, ExpenseEntry.category_id)
+            .order_by(ym_expr)
             .all()
         )
-        for r in rows_tr:
-            trace.setdefault(r.ym, {})
-            trace[r.ym][top_cat_names.get(r.category_id, str(r.category_id))] = float(r.total)
+
+    for r in rows_tr:
+        trace.setdefault(r.ym, {})
+        trace[r.ym][top_cat_names.get(r.category_id, str(r.category_id))] = float(r.total or 0.0)
 
     trace_months = sorted(trace.keys())
     trace_labels = trace_months
@@ -1214,47 +1322,7 @@ def io_dashboard():
             data.append(trace.get(m, {}).get(name, 0.0))
         trace_datasets.append({"label": name, "data": data})
 
-
-    # SQLite+SQLAlchemy: evitamos tuple_ para compatibilidad simple:
-    # armamos IDs manualmente
-    top_cat_objs = []
-    for kind, name in top_cats:
-        c = ExpenseCategory.query.filter_by(kind=kind, name=name).first()
-        if c:
-            top_cat_objs.append(c)
-
-    top_cat_ids = [c.id for c in top_cat_objs]
-    top_cat_names = {c.id: c.name for c in top_cat_objs}
-
-    if top_cat_ids:
-        rows_tr = (
-            db.session.query(
-                func.strftime("%Y-%m", BusinessDay.day).label("ym"),
-                ExpenseEntry.category_id,
-                func.coalesce(func.sum(ExpenseEntry.amount), 0.0).label("total"),
-            )
-            .join(BusinessDay, BusinessDay.id == ExpenseEntry.business_day_id)
-            .filter(BusinessDay.day >= d1, BusinessDay.day <= d2)
-            .filter(ExpenseEntry.category_id.in_(top_cat_ids))
-            .group_by("ym", ExpenseEntry.category_id)
-            .order_by("ym")
-            .all()
-        )
-        for r in rows_tr:
-            trace.setdefault(r.ym, {})
-            trace[r.ym][top_cat_names.get(r.category_id, str(r.category_id))] = float(r.total)
-
-    trace_months = sorted(trace.keys())
-    trace_labels = trace_months
-    trace_datasets = []
-    for cid in top_cat_ids:
-        name = top_cat_names[cid]
-        data = []
-        for m in trace_months:
-            data.append(trace.get(m, {}).get(name, 0.0))
-        trace_datasets.append({"label": name, "data": data})
-
-    # comparativa (principal vs comparación)
+    # comparativa
     if compare_mode == "custom" and c1s and c2s:
         try:
             cd1 = parse_ymd(c1s)
@@ -1296,7 +1364,6 @@ def io_dashboard():
             return "—"
         return f"{x:+.1f}%"
 
-    # tablas: semanal y mensual
     wk_html = ""
     if not weekly_rows:
         wk_html = "<tr><td colspan='4' class='muted'>Sin datos</td></tr>"
@@ -1321,7 +1388,6 @@ def io_dashboard():
                 f"<td class='num'>{ars(r['profit'])}</td></tr>"
             )
 
-    # charts payload
     trace_payload = {"labels": trace_labels, "datasets": trace_datasets}
     trace_json = json.dumps(trace_payload, ensure_ascii=False)
 
@@ -1393,9 +1459,9 @@ def io_dashboard():
         <div class="value">{ars(avg_week_expense)}</div>
       </div>
       <div class="card kpi">
-        <div class="label">Promedio mensual (ingresos)</div>
-        <div class="value">{ars(avg_month_income)}</div>
-        <div class="muted">En el rango seleccionado</div>
+        <div class="label">Promedio semanal (ganancia)</div>
+        <div class="value">{ars(avg_week_profit)}</div>
+        <div class="muted">En semanas con data</div>
       </div>
     </div>
 
@@ -1440,10 +1506,7 @@ def io_dashboard():
 
       <div class="card">
         <h3>Ranking de categorías (gastos)</h3>
-        <table>
-          <thead><tr><th>Tipo</th><th>Categoría</th><th class="num">Total</th></tr></thead>
-          <tbody>{cat_table}</tbody>
-        </table>
+        {cat_rank_html}
         <p class="muted" style="margin-top:10px;">
           Nota: solo aparece si cargaste gastos con categorías (no alcanza con el Excel legacy).
         </p>
@@ -1551,10 +1614,8 @@ def io_dashboard():
 # Export (Excel + JSON)
 # ----------------------------
 def build_export_data(d1: date, d2: date):
-    # días en rango (sin domingos)
     days = (
-        BusinessDay.query
-        .filter(BusinessDay.day >= d1, BusinessDay.day <= d2)
+        BusinessDay.query.filter(BusinessDay.day >= d1, BusinessDay.day <= d2)
         .order_by(BusinessDay.day.asc())
         .all()
     )
@@ -1564,15 +1625,16 @@ def build_export_data(d1: date, d2: date):
     out_expenses = []
     out_categories = []
 
-    # categorías completas (backup)
     cats = ExpenseCategory.query.order_by(ExpenseCategory.kind.asc(), ExpenseCategory.name.asc()).all()
     for c in cats:
-        out_categories.append({
-            "id": c.id,
-            "kind": c.kind,
-            "name": c.name,
-            "created_at": c.created_at.isoformat() if c.created_at else None,
-        })
+        out_categories.append(
+            {
+                "id": c.id,
+                "kind": c.kind,
+                "name": c.name,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+        )
 
     for d in days:
         if is_sunday(d.day):
@@ -1581,38 +1643,44 @@ def build_export_data(d1: date, d2: date):
         recalc_day_status(d)
         t = day_totals(d)
 
-        out_days.append({
-            "date": d.day.isoformat(),
-            "status": d.status,
-            "note": d.note or "",
-            "income": t["income"],
-            "variable_expense": t["variable_expense"],
-            "fixed_expense": t["fixed_expense"],
-            "expense_total": t["expense_total"],
-            "profit": t["profit"],
-        })
+        out_days.append(
+            {
+                "date": d.day.isoformat(),
+                "status": d.status,
+                "note": d.note or "",
+                "income": t["income"],
+                "variable_expense": t["variable_expense"],
+                "fixed_expense": t["fixed_expense"],
+                "expense_total": t["expense_total"],
+                "profit": t["profit"],
+            }
+        )
 
         for s in d.shifts:
-            out_shifts.append({
-                "date": d.day.isoformat(),
-                "shift": s.shift,
-                "income": float(s.income or 0),
-                "note": s.note or "",
-                "is_closed": bool(s.is_closed),
-                "legacy_variable_expense_total": float(s.variable_expense_total or 0),
-                "legacy_fixed_expense_total": float(s.fixed_expense_total or 0),
-            })
+            out_shifts.append(
+                {
+                    "date": d.day.isoformat(),
+                    "shift": s.shift,
+                    "income": float(s.income or 0),
+                    "note": s.note or "",
+                    "is_closed": bool(s.is_closed),
+                    "legacy_variable_expense_total": float(s.variable_expense_total or 0),
+                    "legacy_fixed_expense_total": float(s.fixed_expense_total or 0),
+                }
+            )
 
         for e in d.expenses:
-            out_expenses.append({
-                "date": d.day.isoformat(),
-                "kind": e.kind,
-                "category_id": e.category_id,
-                "category_name": e.category.name if e.category else None,
-                "amount": float(e.amount or 0),
-                "note": e.note or "",
-                "created_at": e.created_at.isoformat() if e.created_at else None,
-            })
+            out_expenses.append(
+                {
+                    "date": d.day.isoformat(),
+                    "kind": e.kind,
+                    "category_id": e.category_id,
+                    "category_name": e.category.name if e.category else None,
+                    "amount": float(e.amount or 0),
+                    "note": e.note or "",
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+            )
 
     return {
         "range": {"from": d1.isoformat(), "to": d2.isoformat()},
@@ -1648,16 +1716,18 @@ def export_to_excel(data: dict) -> BytesIO:
     ws_days = wb.create_sheet("Days")
     ws_days.append(["Fecha", "Estado", "Nota", "Ingresos", "Gasto variable", "Gasto fijo", "Gasto total", "Ganancia"])
     for d in days:
-        ws_days.append([
-            d["date"],
-            d["status"],
-            d["note"],
-            d["income"],
-            d["variable_expense"],
-            d["fixed_expense"],
-            d["expense_total"],
-            d["profit"],
-        ])
+        ws_days.append(
+            [
+                d["date"],
+                d["status"],
+                d["note"],
+                d["income"],
+                d["variable_expense"],
+                d["fixed_expense"],
+                d["expense_total"],
+                d["profit"],
+            ]
+        )
 
     ws_exp = wb.create_sheet("Expenses")
     ws_exp.append(["Fecha", "Tipo", "Categoría", "Monto", "Nota", "Creado"])
@@ -1751,7 +1821,6 @@ def export_download():
             download_name=f"{base_name}.xlsx",
         )
 
-    # JSON
     bio = BytesIO(json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
     return send_file(
         bio,
@@ -1933,7 +2002,7 @@ def edit_day(day):
 
     <div class="grid">
       <div class="card">
-        <h3>Gastos Variables</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;"><h3 style="margin:0;">Gastos Variables</h3><a class="btn" href="/categories/manage?kind=variable&day={bday.day}">Editar categorías</a></div>
 
         <form method="post" action="/categories/add" class="inline" style="margin-bottom:10px;">
           <input type="hidden" name="day" value="{bday.day}" />
@@ -1978,7 +2047,7 @@ def edit_day(day):
       </div>
 
       <div class="card">
-        <h3>Gastos Fijos</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;"><h3 style="margin:0;">Gastos Fijos</h3><a class="btn" href="/categories/manage?kind=fixed&day={bday.day}">Editar categorías</a></div>
 
         <form method="post" action="/categories/add" class="inline" style="margin-bottom:10px;">
           <input type="hidden" name="day" value="{bday.day}" />
@@ -2113,6 +2182,143 @@ def add_category():
     return redirect(url_for("dashboard_finanzas"))
 
 
+
+# ----------------------------
+# Categorías (Administración)
+# ----------------------------
+@app.get("/categories/manage")
+@login_required
+def manage_categories():
+    kind = (request.args.get("kind") or "").strip().lower()
+    day = (request.args.get("day") or "").strip()
+
+    if kind not in ("fixed", "variable"):
+        flash("Tipo de categoría inválido.", "error")
+        return redirect(url_for("dashboard_finanzas"))
+
+    cats = ExpenseCategory.query.filter_by(kind=kind).order_by(ExpenseCategory.name.asc()).all()
+
+    # Conteo de uso por categoría (para no borrar si está en uso)
+    counts = dict(
+        db.session.query(ExpenseEntry.category_id, func.count(ExpenseEntry.id))
+        .group_by(ExpenseEntry.category_id)
+        .all()
+    )
+
+    kind_label = "Fijas" if kind == "fixed" else "Variables"
+
+    rows = ""
+    for c in cats:
+        used = int(counts.get(c.id, 0))
+        disabled = "disabled" if used > 0 else ""
+        disabled_class = "disabled" if used > 0 else ""
+        rows += f"""
+        <tr>
+          <td style="width:40%;">
+            <form method="post" action="/categories/{c.id}/rename" class="inline" style="margin:0;">
+              <input type="hidden" name="kind" value="{kind}" />
+              <input type="hidden" name="day" value="{day}" />
+              <div class="field" style="min-width:260px;">
+                <input name="name" value="{c.name}" />
+              </div>
+              <div style="min-width:140px;">
+                <button class="btn" type="submit" style="width:100%;">Guardar</button>
+              </div>
+            </form>
+          </td>
+          <td class="num" style="width:10%;">{used}</td>
+          <td class="num" style="width:20%;">
+            <form method="post" action="/categories/{c.id}/delete" style="margin:0;">
+              <input type="hidden" name="kind" value="{kind}" />
+              <input type="hidden" name="day" value="{day}" />
+              <button class="btn {disabled_class}" type="submit" {disabled}>Borrar</button>
+            </form>
+          </td>
+        </tr>
+        """
+
+    if not rows:
+        rows = "<tr><td colspan='3' class='muted'>No hay categorías cargadas.</td></tr>"
+
+    back_url = url_for("edit_day", day=day) if day else url_for("dashboard_finanzas")
+
+    body = f"""
+    <h1>Categorías {kind_label}</h1>
+    <p class="muted">Podés renombrar. Borrar solo si no tiene gastos asociados (Uso = 0).</p>
+
+    <div class="card">
+      <a class="btn" href="{back_url}">Volver</a>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead><tr><th>Nombre</th><th class="num">Uso</th><th class="num">Acción</th></tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>
+    """
+    return render_page(body, show_nav=True)
+
+
+@app.post("/categories/<int:cid>/rename")
+@login_required
+def rename_category(cid):
+    kind = (request.form.get("kind") or "").strip().lower()
+    day = (request.form.get("day") or "").strip()
+    name = (request.form.get("name") or "").strip()
+
+    c = db.session.get(ExpenseCategory, cid)
+    if not c:
+        flash("Categoría no encontrada.", "error")
+        return redirect(url_for("manage_categories", kind=kind, day=day))
+
+    if kind not in ("fixed", "variable"):
+        kind = c.kind
+
+    if not name:
+        flash("El nombre no puede estar vacío.", "error")
+        return redirect(url_for("manage_categories", kind=kind, day=day))
+
+    clean = re.sub(r"\s+", " ", name).strip()
+
+    exists = ExpenseCategory.query.filter_by(kind=c.kind, name=clean).first()
+    if exists and exists.id != c.id:
+        flash("Ya existe una categoría con ese nombre.", "error")
+        return redirect(url_for("manage_categories", kind=c.kind, day=day))
+
+    c.name = clean
+    db.session.commit()
+    flash("Categoría actualizada.", "ok")
+    return redirect(url_for("manage_categories", kind=c.kind, day=day))
+
+
+@app.post("/categories/<int:cid>/delete")
+@login_required
+def delete_category(cid):
+    kind = (request.form.get("kind") or "").strip().lower()
+    day = (request.form.get("day") or "").strip()
+
+    c = db.session.get(ExpenseCategory, cid)
+    if not c:
+        flash("Categoría no encontrada.", "error")
+        return redirect(url_for("manage_categories", kind=kind, day=day))
+
+    used = (
+        db.session.query(func.count(ExpenseEntry.id))
+        .filter(ExpenseEntry.category_id == c.id)
+        .scalar()
+        or 0
+    )
+    if used > 0:
+        flash("No se puede borrar: la categoría tiene gastos asociados.", "error")
+        return redirect(url_for("manage_categories", kind=c.kind, day=day))
+
+    db.session.delete(c)
+    db.session.commit()
+    flash("Categoría borrada.", "ok")
+    return redirect(url_for("manage_categories", kind=c.kind, day=day))
+
+
 @app.post("/days/<day>/expense/add")
 @login_required
 def add_expense(day):
@@ -2143,7 +2349,7 @@ def add_expense(day):
         return redirect(url_for("edit_day", day=day))
 
     try:
-        amount = float(amt) if amt else 0.0
+        amount = safe_float(amt) if amt else 0.0
     except ValueError:
         flash("Monto inválido.", "error")
         return redirect(url_for("edit_day", day=day))
@@ -2242,7 +2448,6 @@ def _parse_date_cell(x):
 
 
 def _find_header_map(ws):
-    # B=fecha(2), C=turno(3), D=ingreso(4), E=gasto var(5), F=gasto fijo(6)
     return 2, 3, 4, 5, 6
 
 
@@ -2406,7 +2611,15 @@ def api_dashboard():
 
 
 # ----------------------------
-# Main
+# Init DB (import-time, funciona con Gunicorn)
+# ----------------------------
+with app.app_context():
+    db.create_all()
+    ensure_admin()
+
+
+# ----------------------------
+# Main (solo local)
 # ----------------------------
 if __name__ == "__main__":
     with app.app_context():
