@@ -848,25 +848,23 @@ def dashboard_finanzas():
     # - Gráficamente, mostramos "Ingresos" ocupando el 50% del gráfico.
     #   El otro 50% se reparte entre Gastos y Ganancia según su % sobre Ingresos.
     # =========================
-    # PIE CHART (Ingreso = 100%)
+    # PIE CHART (valores en $)
     # =========================
+    # Mostramos montos reales (Ingresos / Gastos / Ganancia) y en la torta se dibujan esos $.
+    # Nota: un pie chart no soporta valores negativos; si hay pérdida, mostramos "Pérdida" como valor absoluto.
 
     if income > 0:
-        # Porcentajes reales sobre ingresos
-        expense_pct_real = (expense / income) * 100
-        profit_pct_real = (profit / income) * 100
-
-        pie_labels = ["Ingresos", "Gastos", "Ganancia"]
+        pie_labels = ["Ingresos", "Gastos", "Ganancia"] if profit >= 0 else ["Ingresos", "Gastos", "Pérdida"]
 
         pie_values = [
-            100,                         # Ingreso hardcodeado a 100%
-            max(expense_pct_real, 0),    # Ej: 76%
-            max(profit_pct_real, 0)      # Ej: 24%
+            max(income, 0),
+            max(expense, 0),
+            max(profit, 0) if profit >= 0 else abs(profit),
         ]
     else:
         pie_labels = ["Ingresos", "Gastos", "Ganancia"]
         pie_values = [0, 0, 0]
-    charts_payload = {
+        charts_payload = {
         "bar": {"labels": bar_labels, "income": bar_income, "expense": bar_expense, "profit": bar_profit},
         "pie": {"labels": pie_labels, "values": pie_values},
     }
@@ -1015,37 +1013,43 @@ def dashboard_finanzas():
         }}
       }};
 
-      const piePercentPlugin = {{
-        id: 'piePercentPlugin',
-        afterDatasetsDraw(chart) {{
-          if (chart.config.type !== 'pie') return;
-          const ctx = chart.ctx;
-          const dataset = chart.data.datasets[0];
-          const meta = chart.getDatasetMeta(0);
-          const data = dataset.data || [];
-          const total = data.reduce((a,b)=>a + (Number(b)||0), 0) || 1;
+    const pieValuePlugin = {
+      id: 'pieValuePlugin',
+      afterDatasetsDraw(chart) {
+        if (chart.config.type !== 'pie') return;
+        const ctx = chart.ctx;
+        const dataset = chart.data.datasets[0];
+        const meta = chart.getDatasetMeta(0);
+        const data = dataset.data || [];
 
-          ctx.save();
-          ctx.font = '800 12px Arial';
-          ctx.fillStyle = '#111827';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
+        function fmtMoney(v){
+          const n = Math.round(Number(v||0));
+          const s = n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+          return "$ " + s;
+        }
 
-          meta.data.forEach((arc, i) => {{
-            const v = Number(data[i] || 0);
-            if (!v) return;
-            const pct = (v / total) * 100;
-            const label = pct.toFixed(1) + '%';
+        ctx.save();
+        ctx.font = '800 12px Arial';
+        ctx.fillStyle = '#111827';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
 
-            const angle = (arc.startAngle + arc.endAngle) / 2;
-            const r = arc.outerRadius * 0.70;
-            const x = arc.x + Math.cos(angle) * r;
-            const y = arc.y + Math.sin(angle) * r;
-            ctx.fillText(label, x, y);
-          }});
-          ctx.restore();
-        }}
-      }};
+        meta.data.forEach((arc, i) => {
+          const v = Number(data[i] || 0);
+          if (!v) return;
+
+          const label = fmtMoney(v);
+
+          const angle = (arc.startAngle + arc.endAngle) / 2;
+          const r = arc.outerRadius * 0.70;
+          const x = arc.x + Math.cos(angle) * r;
+          const y = arc.y + Math.sin(angle) * r;
+          ctx.fillText(label, x, y);
+        });
+
+        ctx.restore();
+      }
+    };
 
       function makeBarGradient(ctx, baseColor) {{
         const g = ctx.createLinearGradient(0, 0, 0, 280);
