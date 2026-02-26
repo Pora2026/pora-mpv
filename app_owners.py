@@ -1149,7 +1149,7 @@ def dashboard_finanzas():
               legend: {{ position: 'bottom' }}
             }}
           }},
-          plugins: [shadowPlugin, piePercentPlugin]
+          plugins: [shadowPlugin, pieValuePlugin]
         }});
       }}
     </script>
