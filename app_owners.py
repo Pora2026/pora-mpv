@@ -875,7 +875,7 @@ def dashboard_finanzas():
     else:
         options_html = "<option value='' disabled selected>No hay días faltantes</option>"
 
-    body = f"""
+    body = """
     <h1>Gestión Financiera</h1>
 
     <div class="card">
