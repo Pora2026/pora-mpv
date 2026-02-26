@@ -864,7 +864,7 @@ def dashboard_finanzas():
     else:
         pie_labels = ["Ingresos", "Gastos", "Ganancia"]
         pie_values = [0, 0, 0]
-        charts_payload = {
+    charts_payload = {
         "bar": {"labels": bar_labels, "income": bar_income, "expense": bar_expense, "profit": bar_profit},
         "pie": {"labels": pie_labels, "values": pie_values},
     }
@@ -875,7 +875,7 @@ def dashboard_finanzas():
     else:
         options_html = "<option value='' disabled selected>No hay días faltantes</option>"
 
-    body = """
+    body = f"""
     <h1>Gestión Financiera</h1>
 
     <div class="card">
@@ -1013,20 +1013,20 @@ def dashboard_finanzas():
         }}
       }};
 
-    const pieValuePlugin = {
+    const pieValuePlugin = {{
       id: 'pieValuePlugin',
-      afterDatasetsDraw(chart) {
+      afterDatasetsDraw(chart) {{
         if (chart.config.type !== 'pie') return;
         const ctx = chart.ctx;
         const dataset = chart.data.datasets[0];
         const meta = chart.getDatasetMeta(0);
         const data = dataset.data || [];
 
-        function fmtMoney(v){
+        function fmtMoney(v){{
           const n = Math.round(Number(v||0));
-          const s = n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+          const s = n.toString().replace(/\B(?=(\d{{3}})+(?!\d))/g, ".");
           return "$ " + s;
-        }
+        }}
 
         ctx.save();
         ctx.font = '800 12px Arial';
@@ -1034,7 +1034,7 @@ def dashboard_finanzas():
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        meta.data.forEach((arc, i) => {
+        meta.data.forEach((arc, i) => {{
           const v = Number(data[i] || 0);
           if (!v) return;
 
@@ -1045,11 +1045,11 @@ def dashboard_finanzas():
           const x = arc.x + Math.cos(angle) * r;
           const y = arc.y + Math.sin(angle) * r;
           ctx.fillText(label, x, y);
-        });
+        }});
 
         ctx.restore();
-      }
-    };
+      }}
+    }};
 
       function makeBarGradient(ctx, baseColor) {{
         const g = ctx.createLinearGradient(0, 0, 0, 280);
