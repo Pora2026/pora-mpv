@@ -23,7 +23,7 @@ from flask_login import (
     login_required,
 )
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, case
+from sqlalchemy import func, case, text
 from werkzeug.security import generate_password_hash, check_password_hash
 
 
@@ -44,14 +44,11 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 
 if DATABASE_URL:
     app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL.replace("postgres://", "postgresql://")
-
-    # Robustez en Render/Postgres (evita conexiones muertas tras restart/sleep)
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-    "pool_pre_ping": True,
-    "pool_recycle": 280,
-    "pool_timeout": 30,
+        "pool_pre_ping": True,
+        "pool_recycle": 280,
+        "pool_timeout": 30,
     }
-
 else:
     app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI  # SQLite local
 
@@ -89,7 +86,6 @@ def fmt_date_ar_from_iso(iso: str) -> str:
 
 
 def is_sunday(d: date) -> bool:
-    # Monday=0 ... Sunday=6
     return d.weekday() == 6
 
 
@@ -125,9 +121,7 @@ def iso(d: date) -> str:
 
 
 def safe_float(v) -> float:
-    """Convierte strings numéricos estilo AR a float.
-    Soporta: 221223 | 221.223 | 221,223 | 221.223,50 | 221,223.50 | $ 221.223,50
-    """
+    """Convierte strings numéricos estilo AR a float."""
     if v is None:
         return 0.0
     if isinstance(v, (int, float)):
@@ -144,28 +138,36 @@ def safe_float(v) -> float:
 
     if "," in s and "." in s:
         if s.rfind(".") > s.rfind(","):
-            # 1,234.56 -> coma miles, punto decimal
             s = s.replace(",", "")
         else:
-            # 1.234,56 -> punto miles, coma decimal
             s = s.replace(".", "").replace(",", ".")
         return float(s)
 
     if "," in s:
-        # miles: 1,234,567
         if re.match(r"^-?\d{1,3}(,\d{3})+$", s):
             return float(s.replace(",", ""))
-        # decimal: 123,45
         return float(s.replace(",", "."))
 
     if "." in s:
-        # miles: 1.234.567
         if re.match(r"^-?\d{1,3}(\.\d{3})+$", s):
             return float(s.replace(".", ""))
         return float(s)
 
     return float(s)
 
+
+def iter_month_labels(d1: date, d2: date) -> list[str]:
+    start = date(d1.year, d1.month, 1)
+    end = date(d2.year, d2.month, 1)
+    out = []
+    cur = start
+    while cur <= end:
+        out.append(f"{cur.year}-{cur.month:02d}")
+        if cur.month == 12:
+            cur = date(cur.year + 1, 1, 1)
+        else:
+            cur = date(cur.year, cur.month + 1, 1)
+    return out
 
 
 # ----------------------------
@@ -187,6 +189,9 @@ class BusinessDay(db.Model):
     status = db.Column(db.String(20), default="draft")  # draft|complete
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # Ganancia real manual (persistente)
+    real_profit = db.Column(db.Float, nullable=True)
+
     shifts = db.relationship("ShiftRecord", backref="business_day", cascade="all, delete-orphan")
     expenses = db.relationship("ExpenseEntry", backref="business_day", cascade="all, delete-orphan")
 
@@ -197,10 +202,9 @@ class ShiftRecord(db.Model):
     business_day_id = db.Column(db.Integer, db.ForeignKey("business_days.id"), nullable=False)
 
     shift = db.Column(db.String(10), nullable=False)  # "Mañana" / "Tarde"
-
     income = db.Column(db.Float, default=0.0)
 
-    # Legacy: compatibilidad con import Excel viejo
+    # Legacy
     variable_expense_total = db.Column(db.Float, default=0.0)
     fixed_expense_total = db.Column(db.Float, default=0.0)
 
@@ -249,7 +253,6 @@ def ensure_shifts(bday: BusinessDay):
 
 
 def recalc_day_status(bday: BusinessDay):
-    """complete si hay al menos 1 turno cerrado (permite medio día)."""
     if not bday:
         return
     ensure_shifts(bday)
@@ -258,7 +261,6 @@ def recalc_day_status(bday: BusinessDay):
 
 
 def day_totals(bday: BusinessDay) -> dict:
-    """Si hay ExpenseEntry -> usa categorías. Si no -> usa legacy del Excel."""
     income = sum(s.income or 0 for s in bday.shifts)
 
     if bday.expenses and len(bday.expenses) > 0:
@@ -300,22 +302,33 @@ def ensure_admin():
         db.session.commit()
 
 
+def ensure_schema():
+    dialect = db.engine.dialect.name
+    try:
+        if dialect == "postgresql":
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_profit DOUBLE PRECISION;"))
+            db.session.commit()
+            return
+        cols = db.session.execute(text("PRAGMA table_info(business_days);")).fetchall()
+        existing = {c[1] for c in cols}
+        if "real_profit" not in existing:
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_profit REAL;"))
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
 def range_series(d1: date, d2: date):
-    """
-    Serie agregada por día (sin domingos).
-    - Si un día tiene ExpenseEntry: usa esos gastos (var/fix).
-    - Si no: usa ShiftRecord legacy.
-    """
     exp_sub = (
         db.session.query(
             ExpenseEntry.business_day_id.label("bdid"),
             func.count(ExpenseEntry.id).label("cnt"),
-            func.coalesce(
-                func.sum(case((ExpenseEntry.kind == "variable", ExpenseEntry.amount), else_=0.0)), 0.0
-            ).label("var_cat"),
-            func.coalesce(
-                func.sum(case((ExpenseEntry.kind == "fixed", ExpenseEntry.amount), else_=0.0)), 0.0
-            ).label("fix_cat"),
+            func.coalesce(func.sum(case((ExpenseEntry.kind == "variable", ExpenseEntry.amount), else_=0.0)), 0.0).label(
+                "var_cat"
+            ),
+            func.coalesce(func.sum(case((ExpenseEntry.kind == "fixed", ExpenseEntry.amount), else_=0.0)), 0.0).label(
+                "fix_cat"
+            ),
         )
         .group_by(ExpenseEntry.business_day_id)
         .subquery()
@@ -461,15 +474,15 @@ BASE_HTML = """
 
     .grid{ display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:12px; }
     .grid3{ display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:12px; }
-    .grid6{ display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:12px; }
     .grid4{ display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:12px; }
+    .grid8{ display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:12px; }
 
     @media (max-width: 980px){
-      .grid6{ grid-template-columns: repeat(2,minmax(0,1fr)); }
+      .grid8{ grid-template-columns: repeat(2,minmax(0,1fr)); }
       .grid4{ grid-template-columns: repeat(2,minmax(0,1fr)); }
     }
     @media (max-width: 640px){
-      .grid, .grid3, .grid6, .grid4{ grid-template-columns: 1fr; }
+      .grid, .grid3, .grid4, .grid8{ grid-template-columns: 1fr; }
     }
 
     .kpi{ display:flex; flex-direction:column; gap:6px; border-radius: 16px; }
@@ -555,7 +568,6 @@ BASE_HTML = """
     @media (max-width: 640px){ .chartbox{ height: 280px; } }
 
     .neg { color: var(--red); font-weight: 800; }
-
     .inline { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
     .inline .field { flex: 1; min-width: 240px; }
     .small { font-size: 12px; }
@@ -568,9 +580,44 @@ BASE_HTML = """
       box-shadow: var(--shadow2);
       margin: 12px 0;
     }
-    summary{
-      cursor:pointer;
-      font-weight:800;
+    summary{ cursor:pointer; font-weight:800; }
+
+    .legend-row{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center;}
+    .legend-row .muted{ margin-right:6px;}
+
+    /* ✅ Para que la referencia del margen no agrande el KPI (Panel Central) */
+    .legend-row.compact { margin-top:6px; gap:6px; }
+    .legend-row.compact .pill{ padding:3px 8px; font-size:11px; }
+    .margen-kpi{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .margen-kpi .margen-left{
+      flex:1;
+      min-width: 120px;
+    }
+    .margen-kpi .margen-right{
+      width: 132px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      align-items:flex-start;
+    }
+    .margen-kpi .margen-right .muted{
+      font-size:11px;
+      margin:0;
+    }
+    .margen-kpi .margen-right .pill{
+      padding:3px 8px;
+      font-size:11px;
+      white-space:nowrap;
+    }
+
+    @media (max-width: 640px){
+      .margen-kpi{ flex-direction:column; }
+      .margen-kpi .margen-right{ width:auto; flex-direction:row; flex-wrap:wrap; }
     }
   </style>
 </head>
@@ -580,7 +627,7 @@ BASE_HTML = """
   {% if show_nav %}
   <div class="nav">
     <a href="{{ url_for('home') }}">Inicio</a>
-    <a href="{{ url_for('dashboard_finanzas') }}">Gestión Financiera</a>
+    <a href="{{ url_for('dashboard_finanzas') }}">Panel Central</a>
     <a href="{{ url_for('io_dashboard') }}">Gestión Ingresos y Gastos</a>
     <a href="{{ url_for('list_days') }}">Días</a>
     <a href="{{ url_for('import_balance_get') }}">Importar Balance</a>
@@ -600,6 +647,27 @@ BASE_HTML = """
   {{ body|safe }}
 
   </div>
+
+  <script>
+    // ✅ Evita el "salto al top": guardamos scroll antes de submit y restauramos al cargar.
+    (function(){
+      try{
+        document.addEventListener('submit', function(){
+          localStorage.setItem('scrollY', String(window.scrollY || 0));
+        }, true);
+
+        window.addEventListener('load', function(){
+          const y = localStorage.getItem('scrollY');
+          if(y !== null){
+            const n = parseInt(y, 10);
+            if(!isNaN(n)) window.scrollTo(0, n);
+            localStorage.removeItem('scrollY');
+          }
+        });
+      }catch(e){}
+    })();
+  </script>
+
 </body>
 </html>
 """
@@ -654,7 +722,7 @@ def logout():
 
 
 # ----------------------------
-# Home / Panel
+# Home
 # ----------------------------
 @app.get("/")
 @login_required
@@ -671,8 +739,8 @@ def home():
 
     <div class="grid3">
       <div class="card">
-        <h3>Gestión Financiera</h3>
-        <p class="muted">Dashboard + gráficos + alertas.</p>
+        <h3>Panel Central</h3>
+        <p class="muted">Dashboard + gráficos + alertas + ganancia real.</p>
         <a class="btn primary" href="/finanzas">Entrar</a>
       </div>
 
@@ -693,7 +761,7 @@ def home():
 
 
 # ----------------------------
-# Dashboard Finanzas
+# Panel Central
 # ----------------------------
 @app.get("/finanzas")
 @login_required
@@ -727,7 +795,6 @@ def dashboard_finanzas():
     bucket_label, bucket_class = margin_bucket(margen_periodo)
     promedio_diario = (income / len(series)) if series else 0.0
 
-    # Sueldo Ximena (gasto fijo) en el rango seleccionado
     sueldo_ximena = (
         db.session.query(func.coalesce(func.sum(ExpenseEntry.amount), 0.0))
         .join(ExpenseCategory, ExpenseCategory.id == ExpenseEntry.category_id)
@@ -738,6 +805,10 @@ def dashboard_finanzas():
         .scalar()
         or 0.0
     )
+
+    # ✅ KPI NUEVO: Sueldo restante
+    SUELDO_XIMENA_META = 3_000_000
+    sueldo_restante = SUELDO_XIMENA_META - float(sueldo_ximena or 0.0)
 
     existing_days = {parse_ymd(x["date"]) for x in series}
     missing_days = [d for d in iter_workdays(d1, d2) if d not in existing_days]
@@ -816,22 +887,6 @@ def dashboard_finanzas():
     best_html = rank_rows(best3)
     worst_html = rank_rows(worst3)
 
-    rows_html = ""
-    for rr in ranked:
-        mlabel, mclass = margin_bucket(rr["margin"])
-        profit_cls = "neg" if rr["profit"] < 0 else ""
-        rows_html += (
-            "<tr>"
-            f"<td><a href='/days/{rr['date_iso']}'>{rr['date_ar']}</a></td>"
-            f"<td class='num'>{ars(rr['income'])}</td>"
-            f"<td class='num'>{ars(rr['expense'])}</td>"
-            f"<td class='num {profit_cls}'>{ars(rr['profit'])}</td>"
-            f"<td class='num'><span class='{mclass}'>{mlabel}</span></td>"
-            "</tr>"
-        )
-    if not rows_html:
-        rows_html = "<tr><td colspan='5' class='muted'>No hay datos en el rango seleccionado.</td></tr>"
-
     if not alerts_clean:
         alerts_html = "<div class='muted'>Sin alertas (no hubo días con gastos mayores a $ 500.000).</div>"
     else:
@@ -843,31 +898,16 @@ def dashboard_finanzas():
             )
         alerts_html += "</ul>"
 
-    # Torta del período:
-    # - En números, Ingresos es el 100%.
-    # - Gráficamente, mostramos "Ingresos" ocupando el 50% del gráfico.
-    #   El otro 50% se reparte entre Gastos y Ganancia según su % sobre Ingresos.
-    # =========================
-    # PIE CHART (valores en $)
-    # =========================
-    # Mostramos montos reales (Ingresos / Gastos / Ganancia) y en la torta se dibujan esos $.
-    # Nota: un pie chart no soporta valores negativos; si hay pérdida, mostramos "Pérdida" como valor absoluto.
-
+    # Pie chart
     if income > 0:
         pie_labels = ["Ingresos", "Gastos", "Ganancia"] if profit >= 0 else ["Ingresos", "Gastos", "Pérdida"]
-
-        pie_values = [
-            max(income, 0),
-            max(expense, 0),
-            max(profit, 0) if profit >= 0 else abs(profit),
-        ]
+        pie_values = [max(income, 0), max(expense, 0), max(profit, 0) if profit >= 0 else abs(profit)]
     else:
         pie_labels = ["Ingresos", "Gastos", "Ganancia"]
         pie_values = [0, 0, 0]
-    charts_payload = {
-        "bar": {"labels": bar_labels, "income": bar_income, "expense": bar_expense, "profit": bar_profit},
-        "pie": {"labels": pie_labels, "values": pie_values},
-    }
+
+    charts_payload = {"bar": {"labels": bar_labels, "income": bar_income, "expense": bar_expense, "profit": bar_profit},
+                      "pie": {"labels": pie_labels, "values": pie_values}}
     charts_json = json.dumps(charts_payload, ensure_ascii=False)
 
     if missing_days:
@@ -875,8 +915,111 @@ def dashboard_finanzas():
     else:
         options_html = "<option value='' disabled selected>No hay días faltantes</option>"
 
+    # ---------------------------------------------------------
+    # Control Ganancia Calculada vs Real (DIARIO)
+    # ---------------------------------------------------------
+    all_days = list(iter_workdays(d1, d2))
+    bdays = (
+        BusinessDay.query.filter(BusinessDay.day >= d1, BusinessDay.day <= d2)
+        .order_by(BusinessDay.day.asc())
+        .all()
+    )
+    bmap = {b.day: b for b in bdays}
+
+    cmp_rows = []
+    real_accum = 0.0  # ✅ KPI NUEVO: ganancia real acumulada en rango (sum real_profit)
+    for d in all_days:
+        b = bmap.get(d)
+        if b:
+            ensure_shifts(b)
+            recalc_day_status(b)
+            t = day_totals(b)
+            calc = float(t["profit"])
+            real = b.real_profit if b.real_profit is not None else None
+        else:
+            calc = 0.0
+            real = None
+
+        if real is not None:
+            real_accum += float(real)
+
+        diff = (calc - float(real)) if (real is not None) else None
+
+        cmp_rows.append(
+            {"date": d, "date_ar": fmt_date_ar(d), "date_iso": d.isoformat(), "calc": calc, "real": real, "diff": diff}
+        )
+
+    cmp_labels = [r["date_ar"] for r in cmp_rows]
+    cmp_calc = [round(r["calc"], 2) for r in cmp_rows]
+    cmp_real = [None if r["real"] is None else round(float(r["real"]), 2) for r in cmp_rows]
+    cmp_payload = {"labels": cmp_labels, "calc": cmp_calc, "real": cmp_real}
+    cmp_json = json.dumps(cmp_payload, ensure_ascii=False)
+
+    head_rows = cmp_rows[:3]
+    tail_rows = cmp_rows[3:]
+
+    def _cmp_tr(r):
+        diff = r["diff"]
+        if diff is None:
+            diff_html = "<span class='muted'>—</span>"
+            status_html = "<span class='pill warn'>NO OK</span>"
+        else:
+            diff_cls = "neg" if diff != 0 else ""
+            diff_html = f"<span class='{diff_cls}'>{ars(diff)}</span>"
+            status_html = "<span class='pill ok'>OK</span>" if diff == 0 else "<span class='pill bad'>NO OK</span>"
+
+        real_val = "" if r["real"] is None else str(float(r["real"]))
+
+        # ✅ Guardado por AJAX: no recarga ni mueve pantalla
+        form = f"""
+        <form class="realProfitForm" data-day="{r['date_iso']}" style="margin:0;">
+          <input type="hidden" name="day" value="{r['date_iso']}" />
+          <div class="inline" style="justify-content:flex-end;">
+            <div class="field" style="min-width:180px;">
+              <input name="real_profit" placeholder="Ej: 120000" value="{real_val}" />
+            </div>
+            <div style="min-width:120px;">
+              <button class="btn" type="submit" style="width:100%;">Guardar</button>
+            </div>
+          </div>
+        </form>
+        """
+        return (
+            "<tr>"
+            f"<td>{r['date_ar']}</td>"
+            f"<td class='num'>{ars(r['calc'])}</td>"
+            f"<td>{form}</td>"
+            f"<td class='num diffCell'>{diff_html}</td>"
+            f"<td class='statusCell'>{status_html}</td>"
+            "</tr>"
+        )
+
+    head_html = "".join(_cmp_tr(r) for r in head_rows) if head_rows else "<tr><td colspan='5' class='muted'>Sin datos</td></tr>"
+    tail_html = "".join(_cmp_tr(r) for r in tail_rows)
+
+    details_html = ""
+    if tail_rows:
+        details_html = f"""
+        <details>
+          <summary>Ver más días</summary>
+          <div style="height:10px;"></div>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th class="num">Ganancia calculada</th>
+                <th>Ganancia real (editable)</th>
+                <th class="num">Diferencia</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>{tail_html}</tbody>
+          </table>
+        </details>
+        """
+
     body = f"""
-    <h1>Gestión Financiera</h1>
+    <h1>Panel Central</h1>
 
     <div class="card">
       <form method="get" action="/finanzas">
@@ -916,32 +1059,63 @@ def dashboard_finanzas():
       </form>
     </details>
 
-    <div class="grid6">
+    <!-- ✅ KPI 8 (4 columnas x 2 filas) -->
+    <div class="grid8">
       <div class="card kpi income">
         <div class="label">Ingresos</div>
         <div class="value">{ars(income)}</div>
       </div>
+
       <div class="card kpi expense">
         <div class="label">Gastos</div>
         <div class="value">{ars(expense)}</div>
       </div>
+
       <div class="card kpi profit">
         <div class="label">Ganancia</div>
         <div class="value">{ars(profit)}</div>
       </div>
-      <div class="card kpi">
-        <div class="label">Margen</div>
-        <div class="value">{(f"{margen_periodo:.1f}%" if margen_periodo is not None else "—")}</div>
-        <div style="margin-top:6px;"><span class="{bucket_class}">{bucket_label}</span></div>
+
+      <!-- NUEVO -->
+      <div class="card kpi profit">
+        <div class="label">Ganancia real (acumulada)</div>
+        <div class="value">{ars(real_accum)}</div>
+        <div class="muted">Suma de la ganancia real cargada</div>
       </div>
+
+     <div class="card kpi">
+     <div class="margen-kpi">
+        <div class="margen-left">
+          <div class="label">Margen</div>
+          <div class="value">{(f"{margen_periodo:.1f}%" if margen_periodo is not None else "—")}</div>
+          <div style="margin-top:6px;"><span class="{bucket_class}">{bucket_label}</span></div>
+        </div>
+
+        <div class="margen-right">
+          <div class="muted">Ref.</div>
+          <span class="pill bad">Malo ≤ 20</span>
+          <span class="pill warn">Regular ≤ 30</span>
+          <span class="pill ok">Bueno ≥ 31</span>
+        </div>
+      </div>
+    </div>
+
       <div class="card kpi">
         <div class="label">Promedio diario (Ingresos)</div>
         <div class="value">{ars(promedio_diario)}</div>
       </div>
+
       <div class="card kpi">
         <div class="label">Sueldo Ximena</div>
         <div class="value">{ars(sueldo_ximena)}</div>
-        <div class="muted">Gasto fijo en el rango seleccionado</div>
+        <div class="muted">Gasto fijo en el rango</div>
+      </div>
+
+      <!-- NUEVO -->
+      <div class="card kpi">
+        <div class="label">Sueldo Ximena restante</div>
+        <div class="value">{ars(sueldo_restante)}</div>
+        <div class="muted">{ars(SUELDO_XIMENA_META)} − Sueldo Ximena</div>
       </div>
     </div>
 
@@ -979,24 +1153,34 @@ def dashboard_finanzas():
       {alerts_html}
     </div>
 
-    <div class="card">
-      <h3>Serie del período</h3>
+    <div class="card" id="profit-control">
+      <h3>Control de Ganancia Calculada vs Real (DIARIO)</h3>
+      <div class="chartbox"><canvas id="profitCompareChart"></canvas></div>
+      <p class="muted" style="margin-top:10px;">
+        Ganancia calculada = Ingresos − Gastos. Ganancia real = valor manual (guardado). Diferencia = Calculada − Real.
+      </p>
+
+      <div style="height:10px;"></div>
+
       <table>
         <thead>
           <tr>
             <th>Fecha</th>
-            <th class="num">Ingresos</th>
-            <th class="num">Gastos</th>
-            <th class="num">Ganancia</th>
-            <th class="num">Margen</th>
+            <th class="num">Ganancia calculada</th>
+            <th>Ganancia real (editable)</th>
+            <th class="num">Diferencia</th>
+            <th>Estado</th>
           </tr>
         </thead>
-        <tbody>{rows_html}</tbody>
+        <tbody>{head_html}</tbody>
       </table>
+
+      {details_html}
     </div>
 
     <script>
       const payload = {charts_json};
+      const profitCmp = {cmp_json};
 
       const shadowPlugin = {{
         id: 'shadowPlugin',
@@ -1013,43 +1197,43 @@ def dashboard_finanzas():
         }}
       }};
 
-    const pieValuePlugin = {{
-      id: 'pieValuePlugin',
-      afterDatasetsDraw(chart) {{
-        if (chart.config.type !== 'pie') return;
-        const ctx = chart.ctx;
-        const dataset = chart.data.datasets[0];
-        const meta = chart.getDatasetMeta(0);
-        const data = dataset.data || [];
-
-        function fmtMoney(v){{
-          const n = Math.round(Number(v||0));
-          const s = n.toString().replace(/\B(?=(\d{{3}})+(?!\d))/g, ".");
-          return "$ " + s;
-        }}
-
-        ctx.save();
-        ctx.font = '800 12px Arial';
-        ctx.fillStyle = '#111827';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        meta.data.forEach((arc, i) => {{
-          const v = Number(data[i] || 0);
-          if (!v) return;
-
-          const label = fmtMoney(v);
-
-          const angle = (arc.startAngle + arc.endAngle) / 2;
-          const r = arc.outerRadius * 0.70;
-          const x = arc.x + Math.cos(angle) * r;
-          const y = arc.y + Math.sin(angle) * r;
-          ctx.fillText(label, x, y);
-        }});
-
-        ctx.restore();
+      function fmtMoney(v){{
+        const n = Math.round(Number(v||0));
+        const s = n.toString().replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ".");
+        return "$ " + s;
       }}
-    }};
+
+      const pieValuePlugin = {{
+        id: 'pieValuePlugin',
+        afterDatasetsDraw(chart) {{
+          if (chart.config.type !== 'pie') return;
+          const ctx = chart.ctx;
+          const dataset = chart.data.datasets[0];
+          const meta = chart.getDatasetMeta(0);
+          const data = dataset.data || [];
+
+          ctx.save();
+          ctx.font = '800 12px Arial';
+          ctx.fillStyle = '#111827';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          meta.data.forEach((arc, i) => {{
+            const v = Number(data[i] || 0);
+            if (!v) return;
+
+            const label = fmtMoney(v);
+
+            const angle = (arc.startAngle + arc.endAngle) / 2;
+            const r = arc.outerRadius * 0.70;
+            const x = arc.x + Math.cos(angle) * r;
+            const y = arc.y + Math.sin(angle) * r;
+            ctx.fillText(label, x, y);
+          }});
+
+          ctx.restore();
+        }}
+      }};
 
       function makeBarGradient(ctx, baseColor) {{
         const g = ctx.createLinearGradient(0, 0, 0, 280);
@@ -1104,9 +1288,7 @@ def dashboard_finanzas():
               tooltip: {{
                 callbacks: {{
                   label: function(context) {{
-                    const v = context.raw || 0;
-                    const s = Math.round(v).toString().replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ".");
-                    return `${{context.dataset.label}}: $ ${{s}}`;
+                    return `${{context.dataset.label}}: ${{fmtMoney(context.raw || 0)}}`;
                   }}
                 }}
               }}
@@ -1152,17 +1334,159 @@ def dashboard_finanzas():
           plugins: [shadowPlugin, pieValuePlugin]
         }});
       }}
+
+      // Comparativo Calc vs Real
+      const pc = document.getElementById("profitCompareChart");
+      if (pc) {{
+        new Chart(pc, {{
+          type: 'line',
+          data: {{
+            labels: profitCmp.labels,
+            datasets: [
+              {{
+                label: 'Ganancia Calculada',
+                data: profitCmp.calc,
+                tension: 0.25,
+                fill: false,
+                borderWidth: 2,
+                pointRadius: 3
+              }},
+              {{
+                label: 'Ganancia Real',
+                data: profitCmp.real,
+                tension: 0.25,
+                fill: false,
+                borderWidth: 2,
+                pointRadius: 3,
+                spanGaps: false
+              }}
+            ]
+          }},
+          options: {{
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {{
+              legend: {{ position: 'bottom' }},
+              tooltip: {{
+                callbacks: {{
+                  label: function(ctx) {{
+                    return `${{ctx.dataset.label}}: ${{fmtMoney(ctx.raw)}}`;
+                  }}
+                }}
+              }}
+            }},
+            scales: {{
+              y: {{
+                ticks: {{
+                  callback: function(value){{ return fmtMoney(value); }}
+                }}
+              }}
+            }}
+          }},
+          plugins: [shadowPlugin]
+        }});
+      }}
+
+      // ✅ AJAX save ganancia real (no reload)
+      async function postRealProfit(form) {{
+        const fd = new FormData(form);
+        const day = fd.get('day');
+        const real_profit = fd.get('real_profit') || "";
+        const res = await fetch('/finanzas/real_profit/save_json', {{
+          method: 'POST',
+          body: fd
+        }});
+        const data = await res.json();
+        if(!data.ok) {{
+          alert(data.error || "Error guardando ganancia real");
+          return;
+        }}
+        // Actualizamos diff/estado en la fila
+        const tr = form.closest('tr');
+        if(tr) {{
+          const diffCell = tr.querySelector('.diffCell');
+          const statusCell = tr.querySelector('.statusCell');
+          if(diffCell) diffCell.innerHTML = data.diff_html;
+          if(statusCell) statusCell.innerHTML = data.status_html;
+        }}
+      }}
+
+      document.querySelectorAll('.realProfitForm').forEach((form) => {{
+        form.addEventListener('submit', function(ev){{
+          ev.preventDefault();
+          postRealProfit(form);
+        }});
+      }});
     </script>
     """
+    db.session.commit()
     return render_page(body, show_nav=True)
 
 
+# Guarda ganancia real (AJAX)
+@app.post("/finanzas/real_profit/save_json")
+@login_required
+def save_real_profit_json():
+    day = (request.form.get("day") or "").strip()
+    v = (request.form.get("real_profit") or "").strip()
+
+    if not day:
+        return jsonify({"ok": False, "error": "Falta fecha"}), 400
+    try:
+        d = parse_ymd(day)
+    except ValueError:
+        return jsonify({"ok": False, "error": "Fecha inválida"}), 400
+    if is_sunday(d):
+        return jsonify({"ok": False, "error": "Domingo: no se trabaja"}), 400
+
+    real_profit = None
+    if v != "":
+        try:
+            real_profit = safe_float(v)
+        except Exception:
+            return jsonify({"ok": False, "error": "Ganancia real inválida"}), 400
+
+    bday = BusinessDay.query.filter_by(day=d).first()
+    if not bday:
+        bday = BusinessDay(day=d, note="", status="draft")
+        db.session.add(bday)
+        db.session.flush()
+        ensure_shifts(bday)
+        recalc_day_status(bday)
+
+    bday.real_profit = real_profit
+    ensure_shifts(bday)
+    recalc_day_status(bday)
+    db.session.commit()
+
+    # Calculada para diff/estado
+    t = day_totals(bday)
+    calc = float(t["profit"])
+    if real_profit is None:
+        diff_html = "<span class='muted'>—</span>"
+        status_html = "<span class='pill warn'>NO OK</span>"
+    else:
+        diff = calc - float(real_profit)
+        cls = "neg" if diff != 0 else ""
+        diff_html = f"<span class='{cls}'>{ars(diff)}</span>"
+        status_html = "<span class='pill ok'>OK</span>" if diff == 0 else "<span class='pill bad'>NO OK</span>"
+
+    return jsonify({"ok": True, "diff_html": diff_html, "status_html": status_html})
+
+
 # ----------------------------
-# Gestión Ingresos y Gastos
+# Gestión Ingresos y Gastos (ajustes: KPI semanal + blindaje error + fix HTML)
 # ----------------------------
 @app.get("/io")
 @login_required
 def io_dashboard():
+    # ✅ Blindaje: defaults (evita UnboundLocalError en cualquier flujo)
+    avg_week_income = 0.0
+    avg_week_expense = 0.0
+    avg_week_profit = 0.0
+    avg_month_income = 0.0
+    avg_month_expense = 0.0
+
     today = date.today()
     d1s = (request.args.get("from") or "").strip()
     d2s = (request.args.get("to") or "").strip()
@@ -1191,11 +1515,10 @@ def io_dashboard():
     expense = sum(x["expense_total"] for x in series)
     profit = income - expense
 
-    # promedios semanales (por semanas con datos)
     weekly = {}
     for x in series:
         d = parse_ymd(x["date"])
-        yw = d.isocalendar()[:2]  # (year, week)
+        yw = d.isocalendar()[:2]
         weekly.setdefault(yw, {"income": 0.0, "expense": 0.0})
         weekly[yw]["income"] += x["income"]
         weekly[yw]["expense"] += x["expense_total"]
@@ -1203,19 +1526,19 @@ def io_dashboard():
     weekly_rows = []
     for (y, w), v in sorted(weekly.items()):
         weekly_rows.append(
-            {
-                "label": f"{y}-W{w:02d}",
-                "income": v["income"],
-                "expense": v["expense"],
-                "profit": v["income"] - v["expense"],
-            }
+            {"label": f"{y}-W{w:02d}", "income": v["income"], "expense": v["expense"], "profit": v["income"] - v["expense"]}
         )
 
-        avg_week_income = (sum(r["income"] for r in weekly_rows) / len(weekly_rows)) if weekly_rows else 0.0
-    avg_week_expense = (sum(r["expense"] for r in weekly_rows) / len(weekly_rows)) if weekly_rows else 0.0
-    avg_week_profit = (sum(r["profit"] for r in weekly_rows) / len(weekly_rows)) if weekly_rows else 0.0
+    # ✅ promedios semanales (como antes)
+    if weekly_rows:
+        avg_week_income = (sum(r["income"] for r in weekly_rows) / len(weekly_rows))
+        avg_week_expense = (sum(r["expense"] for r in weekly_rows) / len(weekly_rows))
+        avg_week_profit = (sum(r["profit"] for r in weekly_rows) / len(weekly_rows))
+    else:
+        avg_week_income = 0.0
+        avg_week_expense = 0.0
+        avg_week_profit = 0.0
 
-    # promedio mensual dentro del rango
     monthly = {}
     for x in series:
         d = parse_ymd(x["date"])
@@ -1231,7 +1554,6 @@ def io_dashboard():
     avg_month_income = (sum(r["income"] for r in monthly_rows) / len(monthly_rows)) if monthly_rows else 0.0
     avg_month_expense = (sum(r["expense"] for r in monthly_rows) / len(monthly_rows)) if monthly_rows else 0.0
 
-    # gastos por categoría (solo ExpenseEntry)
     cat_rows = (
         db.session.query(
             ExpenseCategory.kind,
@@ -1281,11 +1603,10 @@ def io_dashboard():
             </details>
             """.format(rest_html=rest_html)
 
-    # trazabilidad mensual por categoría (Top 6)
+    # trazabilidad mensual top categorías (dejamos como está por tu pedido)
     top_cats = [(r.kind, r.name) for r in cat_rows[:6]]
-    trace = {}  # month -> {catName: total}
+    trace = {}
 
-    # buscamos IDs sin tuple_()
     top_cat_objs = []
     for kind, name in top_cats:
         c = ExpenseCategory.query.filter_by(kind=kind, name=name).first()
@@ -1295,8 +1616,7 @@ def io_dashboard():
     top_cat_ids = [c.id for c in top_cat_objs]
     top_cat_names = {c.id: c.name for c in top_cat_objs}
 
-    # Expresión "YYYY-MM" compatible con Postgres y SQLite
-    dialect = db.engine.dialect.name  # "postgresql" o "sqlite"
+    dialect = db.engine.dialect.name
     if dialect == "postgresql":
         ym_expr = func.to_char(BusinessDay.day, "YYYY-MM")
     else:
@@ -1446,7 +1766,8 @@ def io_dashboard():
       </form>
     </div>
 
-    <div class="grid6">
+    <!-- ✅ VUELVE A COMO ESTABA: 3 KPIs del rango -->
+    <div class="grid3">
       <div class="card kpi income">
         <div class="label">Ingresos (rango)</div>
         <div class="value">{ars(income)}</div>
@@ -1459,7 +1780,10 @@ def io_dashboard():
         <div class="label">Ganancia (rango)</div>
         <div class="value">{ars(profit)}</div>
       </div>
+    </div>
 
+    <!-- ✅ Y ABAJO LOS 3 KPIs DE PROMEDIO SEMANAL (como antes) -->
+    <div class="grid3">
       <div class="card kpi">
         <div class="label">Promedio semanal (ingresos)</div>
         <div class="value">{ars(avg_week_income)}</div>
@@ -1545,7 +1869,7 @@ def io_dashboard():
       <h3>Trazabilidad mensual (Top categorías)</h3>
       <div class="chartbox"><canvas id="traceChart"></canvas></div>
       <p class="muted" style="margin-top:10px;">
-        Muestra hasta 6 categorías más “pesadas” del rango, mes a mes.
+        (Lo dejamos como está por ahora, lo corregimos después).
       </p>
     </div>
 
@@ -1579,7 +1903,7 @@ def io_dashboard():
           type: 'line',
           data: {{
             labels: trace.labels,
-            datasets: trace.datasets.map((ds, idx) => {{
+            datasets: trace.datasets.map((ds) => {{
               return {{
                 label: ds.label,
                 data: ds.data,
@@ -1638,12 +1962,7 @@ def build_export_data(d1: date, d2: date):
     cats = ExpenseCategory.query.order_by(ExpenseCategory.kind.asc(), ExpenseCategory.name.asc()).all()
     for c in cats:
         out_categories.append(
-            {
-                "id": c.id,
-                "kind": c.kind,
-                "name": c.name,
-                "created_at": c.created_at.isoformat() if c.created_at else None,
-            }
+            {"id": c.id, "kind": c.kind, "name": c.name, "created_at": c.created_at.isoformat() if c.created_at else None}
         )
 
     for d in days:
@@ -1663,6 +1982,7 @@ def build_export_data(d1: date, d2: date):
                 "fixed_expense": t["fixed_expense"],
                 "expense_total": t["expense_total"],
                 "profit": t["profit"],
+                "real_profit": d.real_profit,
             }
         )
 
@@ -1724,7 +2044,9 @@ def export_to_excel(data: dict) -> BytesIO:
     ws_sum.append(["Nota", "Excel numérico (sin formato pesos). El backup real para reimport es el JSON."])
 
     ws_days = wb.create_sheet("Days")
-    ws_days.append(["Fecha", "Estado", "Nota", "Ingresos", "Gasto variable", "Gasto fijo", "Gasto total", "Ganancia"])
+    ws_days.append(
+        ["Fecha", "Estado", "Nota", "Ingresos", "Gasto variable", "Gasto fijo", "Gasto total", "Ganancia", "Ganancia Real"]
+    )
     for d in days:
         ws_days.append(
             [
@@ -1736,6 +2058,7 @@ def export_to_excel(data: dict) -> BytesIO:
                 d["fixed_expense"],
                 d["expense_total"],
                 d["profit"],
+                d.get("real_profit"),
             ]
         )
 
@@ -1832,16 +2155,11 @@ def export_download():
         )
 
     bio = BytesIO(json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
-    return send_file(
-        bio,
-        mimetype="application/json",
-        as_attachment=True,
-        download_name=f"{base_name}.json",
-    )
+    return send_file(bio, mimetype="application/json", as_attachment=True, download_name=f"{base_name}.json")
 
 
 # ----------------------------
-# Días (CRUD + categorías)
+# Días
 # ----------------------------
 @app.get("/days/go")
 @login_required
@@ -1868,6 +2186,9 @@ def list_days():
         status_pill = "<span class='pill ok'>complete</span>" if d.status == "complete" else "<span class='pill warn'>draft</span>"
         profit_cls = "neg" if totals["profit"] < 0 else ""
 
+        m = (totals["profit"] / totals["income"] * 100.0) if totals["income"] else None
+        mlabel, mclass = margin_bucket(m)
+
         trs += (
             f"<tr>"
             f"<td><a href='/days/{d.day}'>{fmt_date_ar(d.day)}</a></td>"
@@ -1875,11 +2196,12 @@ def list_days():
             f"<td class='num'>{ars(totals['expense_total'])}</td>"
             f"<td class='num {profit_cls}'>{ars(totals['profit'])}</td>"
             f"<td>{status_pill}</td>"
+            f"<td><span class='{mclass}'>{mlabel}</span></td>"
             f"</tr>"
         )
 
     if not trs:
-        trs = "<tr><td colspan='5' class='muted'>Todavía no cargaste ningún día.</td></tr>"
+        trs = "<tr><td colspan='6' class='muted'>Todavía no cargaste ningún día.</td></tr>"
 
     body = f"""
     <h1>Días</h1>
@@ -1892,6 +2214,7 @@ def list_days():
             <th class="num">Gastos</th>
             <th class="num">Ganancia</th>
             <th>Estado</th>
+            <th>Estado del día</th>
           </tr>
         </thead>
         <tbody>{trs}</tbody>
@@ -1957,6 +2280,9 @@ def edit_day(day):
     shifts = {s.shift: s for s in bday.shifts}
     totals = day_totals(bday)
 
+    # ✅ default: si no hay real_profit, proponemos la calculada
+    real_default = totals["profit"] if bday.real_profit is None else bday.real_profit
+
     def v(sh, field):
         s = shifts.get(sh)
         return str(getattr(s, field) or 0) if s else "0"
@@ -2003,6 +2329,18 @@ def edit_day(day):
             <label>Nota turno</label>
             <textarea name="Tarde_note">{n("Tarde")}</textarea>
           </div>
+        </div>
+
+        <div style="height:12px;"></div>
+
+        <!-- ✅ NUEVO: Ganancia real editable al cargar día -->
+        <div class="card" style="margin:12px 0 0;">
+          <h3>Ganancia real (manual)</h3>
+          <p class="muted" style="margin-top:0;">
+            Por defecto se propone la ganancia calculada ({ars(totals["profit"])}). Podés ajustarla.
+          </p>
+          <label>Ganancia real</label>
+          <input name="real_profit" value="{real_default}" />
         </div>
 
         <div style="height:12px;"></div>
@@ -2115,7 +2453,7 @@ def edit_day(day):
           <div class="muted">Variable: {ars(totals["variable_expense"])} · Fijo: {ars(totals["fixed_expense"])}</div>
         </div>
         <div class="kpi profit" style="padding:14px;">
-          <div class="label">Ganancia</div>
+          <div class="label">Ganancia (calculada)</div>
           <div class="value">{ars(totals["profit"])}</div>
         </div>
         <div class="kpi" style="padding:14px;">
@@ -2142,7 +2480,6 @@ def save_day(day):
         return redirect(url_for("list_days"))
 
     bday.note = (request.form.get("note") or "").strip()
-
     ensure_shifts(bday)
 
     for sh in ("Mañana", "Tarde"):
@@ -2154,6 +2491,15 @@ def save_day(day):
         sr.income = safe_float(request.form.get(f"{sh}_income"))
         sr.note = (request.form.get(f"{sh}_note") or "").strip()
         sr.is_closed = True if request.form.get(f"{sh}_closed") == "on" else False
+
+    # ✅ Guardar ganancia real
+    rp_raw = (request.form.get("real_profit") or "").strip()
+    if rp_raw == "":
+        # si lo dejan vacío, guardamos la calculada
+        t = day_totals(bday)
+        bday.real_profit = float(t["profit"])
+    else:
+        bday.real_profit = safe_float(rp_raw)
 
     recalc_day_status(bday)
     db.session.commit()
@@ -2192,10 +2538,6 @@ def add_category():
     return redirect(url_for("dashboard_finanzas"))
 
 
-
-# ----------------------------
-# Categorías (Administración)
-# ----------------------------
 @app.get("/categories/manage")
 @login_required
 def manage_categories():
@@ -2208,7 +2550,6 @@ def manage_categories():
 
     cats = ExpenseCategory.query.filter_by(kind=kind).order_by(ExpenseCategory.name.asc()).all()
 
-    # Conteo de uso por categoría (para no borrar si está en uso)
     counts = dict(
         db.session.query(ExpenseEntry.category_id, func.count(ExpenseEntry.id))
         .group_by(ExpenseEntry.category_id)
@@ -2273,21 +2614,17 @@ def manage_categories():
 @app.post("/categories/<int:cid>/rename")
 @login_required
 def rename_category(cid):
-    kind = (request.form.get("kind") or "").strip().lower()
     day = (request.form.get("day") or "").strip()
     name = (request.form.get("name") or "").strip()
 
     c = db.session.get(ExpenseCategory, cid)
     if not c:
         flash("Categoría no encontrada.", "error")
-        return redirect(url_for("manage_categories", kind=kind, day=day))
-
-    if kind not in ("fixed", "variable"):
-        kind = c.kind
+        return redirect(url_for("manage_categories", kind="fixed", day=day))
 
     if not name:
         flash("El nombre no puede estar vacío.", "error")
-        return redirect(url_for("manage_categories", kind=kind, day=day))
+        return redirect(url_for("manage_categories", kind=c.kind, day=day))
 
     clean = re.sub(r"\s+", " ", name).strip()
 
@@ -2313,12 +2650,7 @@ def delete_category(cid):
         flash("Categoría no encontrada.", "error")
         return redirect(url_for("manage_categories", kind=kind, day=day))
 
-    used = (
-        db.session.query(func.count(ExpenseEntry.id))
-        .filter(ExpenseEntry.category_id == c.id)
-        .scalar()
-        or 0
-    )
+    used = db.session.query(func.count(ExpenseEntry.id)).filter(ExpenseEntry.category_id == c.id).scalar() or 0
     if used > 0:
         flash("No se puede borrar: la categoría tiene gastos asociados.", "error")
         return redirect(url_for("manage_categories", kind=c.kind, day=day))
@@ -2358,12 +2690,7 @@ def add_expense(day):
         flash("Elegí una categoría.", "error")
         return redirect(url_for("edit_day", day=day))
 
-    try:
-        amount = safe_float(amt) if amt else 0.0
-    except ValueError:
-        flash("Monto inválido.", "error")
-        return redirect(url_for("edit_day", day=day))
-
+    amount = safe_float(amt) if amt else 0.0
     if amount <= 0:
         flash("El monto debe ser mayor a 0.", "error")
         return redirect(url_for("edit_day", day=day))
@@ -2373,15 +2700,7 @@ def add_expense(day):
         flash("Categoría inválida.", "error")
         return redirect(url_for("edit_day", day=day))
 
-    db.session.add(
-        ExpenseEntry(
-            business_day_id=bday.id,
-            kind=kind,
-            category_id=cat.id,
-            amount=amount,
-            note=note,
-        )
-    )
+    db.session.add(ExpenseEntry(business_day_id=bday.id, kind=kind, category_id=cat.id, amount=amount, note=note))
     db.session.commit()
 
     flash("Gasto agregado.", "ok")
@@ -2400,7 +2719,7 @@ def delete_expense(day, eid):
 
 
 # ----------------------------
-# Import Excel (mantenido)
+# Import Excel legacy (Balance Diario 2026) - mantenido
 # ----------------------------
 def _to_float_money(x) -> float:
     if x is None:
@@ -2536,55 +2855,377 @@ def import_balance_excel(filepath: str, sheet_names: list[str], mode: str = "ski
     return {"imported": imported, "replaced": replaced, "skipped": skipped}
 
 
+# ----------------------------
+# NUEVO: Import JSON exportado PORA
+# ----------------------------
+def import_export_json(payload: dict, mode: str = "skip") -> dict:
+    imported = 0
+    skipped = 0
+    replaced = 0
+
+    # 1) Categorías
+    cats = payload.get("categories") or []
+    for c in cats:
+        kind = (c.get("kind") or "").strip().lower()
+        name = (c.get("name") or "").strip()
+        if kind not in ("fixed", "variable") or not name:
+            continue
+        ex = ExpenseCategory.query.filter_by(kind=kind, name=name).first()
+        if not ex:
+            db.session.add(ExpenseCategory(kind=kind, name=name))
+
+    db.session.flush()
+
+    # Helper: obtener/crear categoría por kind+name
+    def get_or_create_cat(kind: str, name: str):
+        kind = (kind or "").strip().lower()
+        name = re.sub(r"\s+", " ", (name or "").strip())
+        if kind not in ("fixed", "variable") or not name:
+            return None
+        ex = ExpenseCategory.query.filter_by(kind=kind, name=name).first()
+        if ex:
+            return ex
+        ex = ExpenseCategory(kind=kind, name=name)
+        db.session.add(ex)
+        db.session.flush()
+        return ex
+
+    # 2) Días
+    days = payload.get("days") or []
+    day_map = {}
+    for d in days:
+        ds = (d.get("date") or "").strip()
+        if not ds:
+            continue
+        try:
+            dd = parse_ymd(ds)
+        except Exception:
+            continue
+        if is_sunday(dd):
+            continue
+
+        bday = BusinessDay.query.filter_by(day=dd).first()
+        if bday and mode == "skip":
+            skipped += 1
+            day_map[ds] = bday
+            continue
+
+        if not bday:
+            bday = BusinessDay(day=dd, note="", status="draft")
+            db.session.add(bday)
+            db.session.flush()
+            ensure_shifts(bday)
+            imported += 1
+        else:
+            replaced += 1
+
+        bday.note = d.get("note") or ""
+        bday.status = d.get("status") or "draft"
+        bday.real_profit = d.get("real_profit", None)
+        day_map[ds] = bday
+
+        if mode == "replace":
+            # limpiamos gastos (los reinsertamos abajo)
+            ExpenseEntry.query.filter_by(business_day_id=bday.id).delete()
+            # limpiamos shifts (los reinsertamos)
+            ShiftRecord.query.filter_by(business_day_id=bday.id).delete()
+            db.session.flush()
+            ensure_shifts(bday)
+
+    db.session.flush()
+
+    # 3) Shifts
+    shifts = payload.get("shifts") or []
+    for s in shifts:
+        ds = (s.get("date") or "").strip()
+        sh = (s.get("shift") or "").strip()
+        if ds not in day_map:
+            continue
+        bday = day_map[ds]
+        if sh not in ("Mañana", "Tarde"):
+            continue
+
+        sr = ShiftRecord.query.filter_by(business_day_id=bday.id, shift=sh).first()
+        if not sr:
+            sr = ShiftRecord(business_day=bday, shift=sh)
+            db.session.add(sr)
+
+        sr.income = float(s.get("income") or 0.0)
+        sr.note = s.get("note") or ""
+        sr.is_closed = bool(s.get("is_closed"))
+        sr.variable_expense_total = float(s.get("legacy_variable_expense_total") or 0.0)
+        sr.fixed_expense_total = float(s.get("legacy_fixed_expense_total") or 0.0)
+
+    db.session.flush()
+
+    # 4) Expenses
+    expenses = payload.get("expenses") or []
+    for e in expenses:
+        ds = (e.get("date") or "").strip()
+        if ds not in day_map:
+            continue
+        bday = day_map[ds]
+        kind = (e.get("kind") or "").strip().lower()
+        catname = (e.get("category_name") or "").strip()
+        amount = float(e.get("amount") or 0.0)
+        if amount <= 0:
+            continue
+
+        cat = get_or_create_cat(kind, catname)
+        if not cat:
+            continue
+
+        db.session.add(
+            ExpenseEntry(
+                business_day_id=bday.id,
+                kind=kind,
+                category_id=cat.id,
+                amount=amount,
+                note=e.get("note") or "",
+            )
+        )
+
+    # 5) recalcular estado
+    for bday in day_map.values():
+        ensure_shifts(bday)
+        recalc_day_status(bday)
+
+    db.session.commit()
+    return {"imported": imported, "replaced": replaced, "skipped": skipped}
+
+
+# ----------------------------
+# NUEVO: Import Excel exportado PORA
+# ----------------------------
+def import_export_excel(filepath: str, mode: str = "skip") -> dict:
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+
+    imported = 0
+    skipped = 0
+    replaced = 0
+
+    if "Days" not in wb.sheetnames:
+        raise ValueError("El Excel no parece ser un export de PORA (falta hoja 'Days').")
+
+    ws_days = wb["Days"]
+    ws_exp = wb["Expenses"] if "Expenses" in wb.sheetnames else None
+    ws_cat = wb["Categories"] if "Categories" in wb.sheetnames else None
+
+    # Categories: (ID, Tipo, Nombre, Creado)
+    if ws_cat:
+        for r in range(2, ws_cat.max_row + 1):
+            kind = (ws_cat.cell(r, 2).value or "").strip().lower()
+            name = (ws_cat.cell(r, 3).value or "").strip()
+            if kind not in ("fixed", "variable") or not name:
+                continue
+            ex = ExpenseCategory.query.filter_by(kind=kind, name=name).first()
+            if not ex:
+                db.session.add(ExpenseCategory(kind=kind, name=name))
+        db.session.flush()
+
+    def get_or_create_cat(kind: str, name: str):
+        kind = (kind or "").strip().lower()
+        name = re.sub(r"\s+", " ", (name or "").strip())
+        if kind not in ("fixed", "variable") or not name:
+            return None
+        ex = ExpenseCategory.query.filter_by(kind=kind, name=name).first()
+        if ex:
+            return ex
+        ex = ExpenseCategory(kind=kind, name=name)
+        db.session.add(ex)
+        db.session.flush()
+        return ex
+
+    # Days: Fecha, Estado, Nota, Ingresos, Var, Fix, Total, Ganancia, Ganancia Real
+    day_map = {}
+    for r in range(2, ws_days.max_row + 1):
+        ds = (ws_days.cell(r, 1).value or "").strip()
+        if not ds:
+            continue
+        try:
+            dd = parse_ymd(ds)
+        except Exception:
+            continue
+        if is_sunday(dd):
+            continue
+
+        bday = BusinessDay.query.filter_by(day=dd).first()
+        if bday and mode == "skip":
+            skipped += 1
+            day_map[ds] = bday
+            continue
+
+        if not bday:
+            bday = BusinessDay(day=dd, note="", status="draft")
+            db.session.add(bday)
+            db.session.flush()
+            ensure_shifts(bday)
+            imported += 1
+        else:
+            replaced += 1
+
+        status = (ws_days.cell(r, 2).value or "draft")
+        note = (ws_days.cell(r, 3).value or "")
+        income = float(ws_days.cell(r, 4).value or 0.0)
+        var_exp = float(ws_days.cell(r, 5).value or 0.0)
+        fix_exp = float(ws_days.cell(r, 6).value or 0.0)
+        real_profit = ws_days.cell(r, 9).value
+
+        bday.status = str(status)
+        bday.note = str(note)
+        bday.real_profit = None if real_profit in (None, "") else float(real_profit)
+
+        if mode == "replace":
+            ExpenseEntry.query.filter_by(business_day_id=bday.id).delete()
+            ShiftRecord.query.filter_by(business_day_id=bday.id).delete()
+            db.session.flush()
+
+        # Como el export Excel no trae shifts, volcamos todo al turno Mañana (robusto para totales)
+        ensure_shifts(bday)
+        sr_m = ShiftRecord.query.filter_by(business_day_id=bday.id, shift="Mañana").first()
+        sr_t = ShiftRecord.query.filter_by(business_day_id=bday.id, shift="Tarde").first()
+        if not sr_m:
+            sr_m = ShiftRecord(business_day=bday, shift="Mañana")
+            db.session.add(sr_m)
+        if not sr_t:
+            sr_t = ShiftRecord(business_day=bday, shift="Tarde")
+            db.session.add(sr_t)
+
+        sr_m.income = income
+        sr_m.variable_expense_total = var_exp
+        sr_m.fixed_expense_total = fix_exp
+        sr_m.is_closed = True
+        sr_t.income = 0.0
+        sr_t.variable_expense_total = 0.0
+        sr_t.fixed_expense_total = 0.0
+        sr_t.is_closed = False
+
+        day_map[ds] = bday
+
+    db.session.flush()
+
+    # Expenses: Fecha, Tipo, Categoría, Monto, Nota, Creado
+    if ws_exp:
+        for r in range(2, ws_exp.max_row + 1):
+            ds = (ws_exp.cell(r, 1).value or "").strip()
+            if ds not in day_map:
+                continue
+            kind = (ws_exp.cell(r, 2).value or "").strip().lower()
+            catname = (ws_exp.cell(r, 3).value or "").strip()
+            amount = float(ws_exp.cell(r, 4).value or 0.0)
+            note = (ws_exp.cell(r, 5).value or "")
+            if amount <= 0:
+                continue
+            cat = get_or_create_cat(kind, catname)
+            if not cat:
+                continue
+            db.session.add(
+                ExpenseEntry(
+                    business_day_id=day_map[ds].id,
+                    kind=kind,
+                    category_id=cat.id,
+                    amount=amount,
+                    note=str(note),
+                )
+            )
+
+    for bday in day_map.values():
+        ensure_shifts(bday)
+        recalc_day_status(bday)
+
+    db.session.commit()
+    return {"imported": imported, "replaced": replaced, "skipped": skipped}
+
+
+# ----------------------------
+# Import UI (3 opciones)
+# ----------------------------
 @app.get("/import/balance")
 @login_required
 def import_balance_get():
     body = """
     <h1>Importar Balance Diario</h1>
+
     <div class="card">
-      <form method="post" action="/import/balance" enctype="multipart/form-data">
-        <label>Archivo Excel (Balance Diario 2026)</label>
-        <input type="file" name="file" accept=".xlsx" required />
-
-        <div style="height:12px;"></div>
-        <label>Hojas a importar</label><br/>
-        <div style="height:6px;"></div>
-        <label><input type="checkbox" name="sheets" value="Enero_26" checked /> Enero_26</label><br/>
-        <label><input type="checkbox" name="sheets" value="Febrero_26" checked /> Febrero_26</label>
-
-        <div style="height:12px;"></div>
-        <label>Modo</label>
-        <select name="mode">
-          <option value="skip">No tocar existentes (skip)</option>
-          <option value="replace">Reemplazar existentes (replace)</option>
+      <form method="post" action="/import/dispatcher" enctype="multipart/form-data" id="importForm">
+        <label>Tipo de importación</label>
+        <select name="import_type" id="importType">
+          <option value="legacy">Importar Balance Diario 2026 (Legacy)</option>
+          <option value="export_xlsx">Importar Excel exportado PORA</option>
+          <option value="export_json">Importar JSON exportado PORA</option>
         </select>
 
         <div style="height:12px;"></div>
-        <button class="btn primary" type="submit">Importar</button>
-      </form>
 
-      <p class="muted" style="margin-top:10px;">
-        Nota: este import carga los totales legacy (sin categorías). Si querés categorías: cargalas en “Días”.
-      </p>
+        <label>Archivo</label>
+        <input type="file" name="file" required />
+
+        <div id="legacyBlock" style="margin-top:12px;">
+          <label>Hojas a importar (legacy)</label><br/>
+          <div style="height:6px;"></div>
+          <label><input type="checkbox" name="sheets" value="Enero_26" checked /> Enero_26</label><br/>
+          <label><input type="checkbox" name="sheets" value="Febrero_26" checked /> Febrero_26</label>
+
+          <div style="height:12px;"></div>
+          <label>Modo (legacy)</label>
+          <select name="mode_legacy">
+            <option value="skip">No tocar existentes (skip)</option>
+            <option value="replace">Reemplazar existentes (replace)</option>
+          </select>
+        </div>
+
+        <div id="exportBlock" style="margin-top:12px; display:none;">
+          <label>Modo (export)</label>
+          <select name="mode_export">
+            <option value="skip">No tocar existentes (skip)</option>
+            <option value="replace">Reemplazar existentes (replace)</option>
+          </select>
+
+          <p class="muted" style="margin-top:10px;">
+            Excel/JSON exportados: sirven como backup real. En modo "replace" pisa días y gastos del rango importado.
+          </p>
+        </div>
+
+        <div style="height:12px;"></div>
+        <button class="btn primary" type="submit">Importar</button>
+
+        <p class="muted" style="margin-top:10px;">
+          Tip: el JSON exportado es el backup más completo (incluye turnos y estructura).
+        </p>
+      </form>
     </div>
+
+    <script>
+      const sel = document.getElementById('importType');
+      const legacy = document.getElementById('legacyBlock');
+      const ex = document.getElementById('exportBlock');
+
+      function refresh(){
+        const v = sel.value;
+        if(v === 'legacy'){
+          legacy.style.display = 'block';
+          ex.style.display = 'none';
+        }else{
+          legacy.style.display = 'none';
+          ex.style.display = 'block';
+        }
+      }
+      sel.addEventListener('change', refresh);
+      refresh();
+    </script>
     """
     return render_page(body, show_nav=True)
 
 
-@app.post("/import/balance")
+@app.post("/import/dispatcher")
 @login_required
-def import_balance_post():
+def import_dispatcher():
     f = request.files.get("file")
     if not f:
         flash("No se recibió archivo.", "error")
         return redirect(url_for("import_balance_get"))
 
-    sheets = request.form.getlist("sheets")
-    mode = (request.form.get("mode") or "skip").strip()
-
-    if not sheets:
-        flash("Seleccioná al menos una hoja (Enero_26 / Febrero_26).", "error")
-        return redirect(url_for("import_balance_get"))
+    import_type = (request.form.get("import_type") or "legacy").strip()
 
     uploads_dir = os.path.join(INSTANCE_DIR, "uploads")
     os.makedirs(uploads_dir, exist_ok=True)
@@ -2592,16 +3233,45 @@ def import_balance_post():
     f.save(save_path)
 
     try:
-        result = import_balance_excel(save_path, sheets, mode=mode)
+        if import_type == "legacy":
+            sheets = request.form.getlist("sheets")
+            mode = (request.form.get("mode_legacy") or "skip").strip()
+            if not sheets:
+                flash("Seleccioná al menos una hoja (Enero_26 / Febrero_26).", "error")
+                return redirect(url_for("import_balance_get"))
+            result = import_balance_excel(save_path, sheets, mode=mode)
+            flash(
+                f"Import LEGACY OK — nuevos: {result['imported']}, reemplazados: {result['replaced']}, salteados: {result['skipped']}",
+                "ok",
+            )
+            return redirect(url_for("dashboard_finanzas"))
+
+        mode = (request.form.get("mode_export") or "skip").strip()
+
+        if import_type == "export_json":
+            with open(save_path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+            result = import_export_json(payload, mode=mode)
+            flash(
+                f"Import JSON OK — nuevos: {result['imported']}, reemplazados: {result['replaced']}, salteados: {result['skipped']}",
+                "ok",
+            )
+            return redirect(url_for("dashboard_finanzas"))
+
+        if import_type == "export_xlsx":
+            result = import_export_excel(save_path, mode=mode)
+            flash(
+                f"Import EXCEL OK — nuevos: {result['imported']}, reemplazados: {result['replaced']}, salteados: {result['skipped']}",
+                "ok",
+            )
+            return redirect(url_for("dashboard_finanzas"))
+
+        flash("Tipo de importación inválido.", "error")
+        return redirect(url_for("import_balance_get"))
+
     except Exception as e:
         flash(f"Error importando: {e}", "error")
         return redirect(url_for("import_balance_get"))
-
-    flash(
-        f"Import OK — nuevos: {result['imported']}, reemplazados: {result['replaced']}, salteados: {result['skipped']}",
-        "ok",
-    )
-    return redirect(url_for("dashboard_finanzas"))
 
 
 # ----------------------------
@@ -2625,6 +3295,7 @@ def api_dashboard():
 # ----------------------------
 with app.app_context():
     db.create_all()
+    ensure_schema()
     ensure_admin()
 
 
@@ -2634,5 +3305,6 @@ with app.app_context():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
+        ensure_schema()
         ensure_admin()
     app.run(host="127.0.0.1", port=5001, debug=True)
