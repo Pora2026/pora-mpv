@@ -1,13 +1,37 @@
-# Python / venv
-venv/
+# -----------------------------
+# Python
+# -----------------------------
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# DB local (si querés que NO se suba)
+# -----------------------------
+# Entorno virtual
+# -----------------------------
+venv/
+
+# -----------------------------
+# Variables de entorno
+# -----------------------------
+.env
+
+# -----------------------------
+# Base de datos local
+# -----------------------------
 instance/
 *.db
 
-# Otros
-.env
+# -----------------------------
+# Datos y backups locales
+# -----------------------------
 backup/
 data/
+
+# -----------------------------
+# Archivos del sistema / editor
+# -----------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
