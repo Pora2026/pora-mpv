@@ -16,47 +16,26 @@ from flask import (
     send_file,
 )
 from flask_login import (
-    LoginManager,
-    UserMixin,
     login_user,
     logout_user,
     login_required,
 )
-from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func, case, text
 from werkzeug.security import generate_password_hash, check_password_hash
+
+from app.config import Config, INSTANCE_DIR
+from app.extensions import db, login_manager
+from app.models import User, BusinessDay, ShiftRecord, ExpenseCategory, ExpenseEntry
 
 
 # ----------------------------
 # Config básica
 # ----------------------------
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
-os.makedirs(INSTANCE_DIR, exist_ok=True)
-
-DB_PATH = os.path.join(INSTANCE_DIR, "owners.db")
-DATABASE_URI = "sqlite:///" + DB_PATH
-
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-change-me")
+app.config.from_object(Config)
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
-if DATABASE_URL:
-    app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL.replace("postgres://", "postgresql://")
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-        "pool_pre_ping": True,
-        "pool_recycle": 280,
-        "pool_timeout": 30,
-    }
-else:
-    app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI  # SQLite local
-
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-db = SQLAlchemy(app)
-
-login_manager = LoginManager(app)
+db.init_app(app)
+login_manager.init_app(app)
 login_manager.login_view = "login_get"
 
 
@@ -173,70 +152,6 @@ def iter_month_labels(d1: date, d2: date) -> list[str]:
 # ----------------------------
 # Modelos
 # ----------------------------
-class User(db.Model, UserMixin):
-    __tablename__ = "users"
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)
-    is_admin = db.Column(db.Boolean, default=False)
-
-
-class BusinessDay(db.Model):
-    __tablename__ = "business_days"
-    id = db.Column(db.Integer, primary_key=True)
-    day = db.Column(db.Date, unique=True, nullable=False, index=True)
-    note = db.Column(db.Text, default="")
-    status = db.Column(db.String(20), default="draft")  # draft|complete
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    # Ganancia real manual (persistente)
-    real_profit = db.Column(db.Float, nullable=True)
-
-    shifts = db.relationship("ShiftRecord", backref="business_day", cascade="all, delete-orphan")
-    expenses = db.relationship("ExpenseEntry", backref="business_day", cascade="all, delete-orphan")
-
-
-class ShiftRecord(db.Model):
-    __tablename__ = "shift_records"
-    id = db.Column(db.Integer, primary_key=True)
-    business_day_id = db.Column(db.Integer, db.ForeignKey("business_days.id"), nullable=False)
-
-    shift = db.Column(db.String(10), nullable=False)  # "Mañana" / "Tarde"
-    income = db.Column(db.Float, default=0.0)
-
-    # Legacy
-    variable_expense_total = db.Column(db.Float, default=0.0)
-    fixed_expense_total = db.Column(db.Float, default=0.0)
-
-    note = db.Column(db.Text, default="")
-    is_closed = db.Column(db.Boolean, default=False)
-
-    __table_args__ = (db.UniqueConstraint("business_day_id", "shift", name="uq_day_shift"),)
-
-
-class ExpenseCategory(db.Model):
-    __tablename__ = "expense_categories"
-    id = db.Column(db.Integer, primary_key=True)
-    kind = db.Column(db.String(10), nullable=False)  # "fixed" | "variable"
-    name = db.Column(db.String(120), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    __table_args__ = (db.UniqueConstraint("kind", "name", name="uq_kind_name"),)
-
-
-class ExpenseEntry(db.Model):
-    __tablename__ = "expense_entries"
-    id = db.Column(db.Integer, primary_key=True)
-    business_day_id = db.Column(db.Integer, db.ForeignKey("business_days.id"), nullable=False)
-    kind = db.Column(db.String(10), nullable=False)  # "fixed" | "variable"
-    category_id = db.Column(db.Integer, db.ForeignKey("expense_categories.id"), nullable=False)
-    amount = db.Column(db.Float, default=0.0)
-    note = db.Column(db.Text, default="")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    category = db.relationship("ExpenseCategory")
-
-
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))

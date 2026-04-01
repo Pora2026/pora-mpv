@@ -1,0 +1,13 @@
+# Python / venv
+venv/
+__pycache__/
+*.pyc
+
+# DB local (si querés que NO se suba)
+instance/
+*.db
+
+# Otros
+.env
+backup/
+data/
