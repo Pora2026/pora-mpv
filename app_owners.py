@@ -119,13 +119,22 @@ def ensure_schema():
     try:
         if dialect == "postgresql":
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_profit DOUBLE PRECISION;"))
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_cash_profit DOUBLE PRECISION;"))
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_digital_profit DOUBLE PRECISION;"))
             db.session.commit()
             return
+
         cols = db.session.execute(text("PRAGMA table_info(business_days);")).fetchall()
         existing = {c[1] for c in cols}
+
         if "real_profit" not in existing:
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_profit REAL;"))
-            db.session.commit()
+        if "real_cash_profit" not in existing:
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_cash_profit REAL;"))
+        if "real_digital_profit" not in existing:
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_digital_profit REAL;"))
+
+        db.session.commit()
     except Exception:
         db.session.rollback()
 

@@ -18,6 +18,16 @@ def _owners():
     return render_page, range_series, period_previous
 
 
+def _pill_money(value, kind):
+    if kind == "income":
+        style = "color:#16a34a; border-color: rgba(22,163,74,.25); background: rgba(22,163,74,.10);"
+    elif kind == "expense":
+        style = "color:#dc2626; border-color: rgba(220,38,38,.25); background: rgba(220,38,38,.10);"
+    else:
+        style = "color:#2563eb; border-color: rgba(37,99,235,.25); background: rgba(37,99,235,.10);"
+    return f"<span class='pill' style='{style} font-weight:700;'>{ars(value)}</span>"
+
+
 @io_bp.get("/io")
 @login_required
 def io_dashboard():
@@ -65,13 +75,18 @@ def io_dashboard():
     weekly_rows = []
     for (y, w), v in sorted(weekly.items()):
         weekly_rows.append(
-            {"label": f"{y}-W{w:02d}", "income": v["income"], "expense": v["expense"], "profit": v["income"] - v["expense"]}
+            {
+                "label": f"{y}-W{w:02d}",
+                "income": v["income"],
+                "expense": v["expense"],
+                "profit": v["income"] - v["expense"],
+            }
         )
 
     if weekly_rows:
-        avg_week_income = (sum(r["income"] for r in weekly_rows) / len(weekly_rows))
-        avg_week_expense = (sum(r["expense"] for r in weekly_rows) / len(weekly_rows))
-        avg_week_profit = (sum(r["profit"] for r in weekly_rows) / len(weekly_rows))
+        avg_week_income = sum(r["income"] for r in weekly_rows) / len(weekly_rows)
+        avg_week_expense = sum(r["expense"] for r in weekly_rows) / len(weekly_rows)
+        avg_week_profit = sum(r["profit"] for r in weekly_rows) / len(weekly_rows)
 
     monthly = {}
     for x in series:
@@ -133,46 +148,62 @@ def io_dashboard():
             """.format(rest_html=rest_html)
 
     top_cats = [(r.kind, r.name) for r in cat_rows[:6]]
-    trace = {}
     top_cat_objs = []
     for kind, name in top_cats:
         c = ExpenseCategory.query.filter_by(kind=kind, name=name).first()
         if c:
             top_cat_objs.append(c)
+
     top_cat_ids = [c.id for c in top_cat_objs]
     top_cat_names = {c.id: c.name for c in top_cat_objs}
 
     dialect = db.engine.dialect.name
     ym_expr = func.to_char(BusinessDay.day, "YYYY-MM") if dialect == "postgresql" else func.strftime("%Y-%m", BusinessDay.day)
 
-    rows_tr = []
+    # Trazabilidad mensual global: desde el primer mes con datos hasta el último,
+    # independiente del filtro actual.
+    rows_tr_all = []
     if top_cat_ids:
-        rows_tr = (
+        rows_tr_all = (
             db.session.query(
                 ym_expr.label("ym"),
                 ExpenseEntry.category_id,
                 func.coalesce(func.sum(ExpenseEntry.amount), 0.0).label("total"),
             )
             .join(BusinessDay, BusinessDay.id == ExpenseEntry.business_day_id)
-            .filter(BusinessDay.day >= d1, BusinessDay.day <= d2)
             .filter(ExpenseEntry.category_id.in_(top_cat_ids))
             .group_by(ym_expr, ExpenseEntry.category_id)
             .order_by(ym_expr)
             .all()
         )
 
-    for r in rows_tr:
-        trace.setdefault(r.ym, {})
-        trace[r.ym][top_cat_names.get(r.category_id, str(r.category_id))] = float(r.total or 0.0)
+    trace_all = {}
+    for r in rows_tr_all:
+        trace_all.setdefault(r.ym, {})
+        trace_all[r.ym][top_cat_names.get(r.category_id, str(r.category_id))] = float(r.total or 0.0)
 
-    trace_months = sorted(trace.keys())
-    trace_labels = trace_months
+    # Hardcode: trazabilidad siempre desde 2026-01 hasta el mes actual
+    start_year = 2026
+    start_month = 1
+    end_year = today.year
+    end_month = today.month
+
+    trace_months = []
+    y, m = start_year, start_month
+    while (y < end_year) or (y == end_year and m <= end_month):
+        trace_months.append(f"{y}-{m:02d}")
+        if m == 12:
+            y += 1
+            m = 1
+        else:
+            m += 1
+
     trace_datasets = []
     for cid in top_cat_ids:
         name = top_cat_names[cid]
         data = []
-        for m in trace_months:
-            data.append(trace.get(m, {}).get(name, 0.0))
+        for month_key in trace_months:
+            data.append(trace_all.get(month_key, {}).get(name, 0.0))
         trace_datasets.append({"label": name, "data": data})
 
     if compare_mode == "custom" and c1s and c2s:
@@ -222,9 +253,9 @@ def io_dashboard():
         for r in weekly_rows[-14:]:
             wk_html += (
                 f"<tr><td>{r['label']}</td>"
-                f"<td class='num'>{ars(r['income'])}</td>"
-                f"<td class='num'>{ars(r['expense'])}</td>"
-                f"<td class='num'>{ars(r['profit'])}</td></tr>"
+                f"<td class='num'>{_pill_money(r['income'], 'income')}</td>"
+                f"<td class='num'>{_pill_money(r['expense'], 'expense')}</td>"
+                f"<td class='num'>{_pill_money(r['profit'], 'profit')}</td></tr>"
             )
 
     mo_html = ""
@@ -234,12 +265,12 @@ def io_dashboard():
         for r in monthly_rows:
             mo_html += (
                 f"<tr><td>{r['label']}</td>"
-                f"<td class='num'>{ars(r['income'])}</td>"
-                f"<td class='num'>{ars(r['expense'])}</td>"
-                f"<td class='num'>{ars(r['profit'])}</td></tr>"
+                f"<td class='num'>{_pill_money(r['income'], 'income')}</td>"
+                f"<td class='num'>{_pill_money(r['expense'], 'expense')}</td>"
+                f"<td class='num'>{_pill_money(r['profit'], 'profit')}</td></tr>"
             )
 
-    trace_payload = {"labels": trace_labels, "datasets": trace_datasets}
+    trace_payload = {"labels": trace_months, "datasets": trace_datasets}
     trace_json = json.dumps(trace_payload, ensure_ascii=False)
 
     body = f"""
@@ -318,6 +349,11 @@ def io_dashboard():
       </div>
     </div>
 
+    <div class="card">
+      <h3>Trazabilidad mensual (Top categorías)</h3>
+      <div class="chartbox"><canvas id="traceChart"></canvas></div>
+    </div>
+
     <div class="grid">
       <div class="card">
         <h3>Comparativa vs período elegido</h3>
@@ -364,14 +400,6 @@ def io_dashboard():
           <tbody>{mo_html}</tbody>
         </table>
       </div>
-    </div>
-
-    <div class="card">
-      <h3>Trazabilidad mensual (Top categorías)</h3>
-      <div class="chartbox"><canvas id="traceChart"></canvas></div>
-      <p class="muted" style="margin-top:10px;">
-        (Lo dejamos como está por ahora, lo corregimos después).
-      </p>
     </div>
 
     <script>
@@ -443,5 +471,3 @@ def io_dashboard():
     </script>
     """
     return render_page(body, show_nav=True)
-
-
