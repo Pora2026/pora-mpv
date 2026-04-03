@@ -1,0 +1,2158 @@
+{
+  "range": {
+    "from": "2026-03-01",
+    "to": "2026-04-01"
+  },
+  "generated_at": "2026-04-02T23:31:01.779939",
+  "days": [
+    {
+      "date": "2026-03-02",
+      "status": "complete",
+      "note": "",
+      "income": 411632.0,
+      "variable_expense": 461414.0,
+      "fixed_expense": 18000.0,
+      "expense_total": 479414.0,
+      "profit": -67782.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-03",
+      "status": "complete",
+      "note": "",
+      "income": 921518.0,
+      "variable_expense": 225900.0,
+      "fixed_expense": 0.0,
+      "expense_total": 225900.0,
+      "profit": 695618.0,
+      "real_profit": 141500.0
+    },
+    {
+      "date": "2026-03-04",
+      "status": "complete",
+      "note": "",
+      "income": 764239.0,
+      "variable_expense": 349380.0,
+      "fixed_expense": 14000.0,
+      "expense_total": 363380.0,
+      "profit": 400859.0,
+      "real_profit": 180000.0
+    },
+    {
+      "date": "2026-03-05",
+      "status": "complete",
+      "note": "",
+      "income": 1096172.0,
+      "variable_expense": 522166.0,
+      "fixed_expense": 505200.0,
+      "expense_total": 1027366.0,
+      "profit": 68806.0,
+      "real_profit": 63690.0
+    },
+    {
+      "date": "2026-03-06",
+      "status": "complete",
+      "note": "",
+      "income": 704277.0,
+      "variable_expense": 503887.0,
+      "fixed_expense": 257000.0,
+      "expense_total": 760887.0,
+      "profit": -56610.0,
+      "real_profit": 103000.0
+    },
+    {
+      "date": "2026-03-07",
+      "status": "complete",
+      "note": "",
+      "income": 698322.0,
+      "variable_expense": 0.0,
+      "fixed_expense": 490700.0,
+      "expense_total": 490700.0,
+      "profit": 207622.0,
+      "real_profit": 147742.0
+    },
+    {
+      "date": "2026-03-09",
+      "status": "complete",
+      "note": "",
+      "income": 721874.0,
+      "variable_expense": 420517.0,
+      "fixed_expense": 325366.0,
+      "expense_total": 745883.0,
+      "profit": -24009.0,
+      "real_profit": 175911.0
+    },
+    {
+      "date": "2026-03-10",
+      "status": "complete",
+      "note": "",
+      "income": 1128360.0,
+      "variable_expense": 109700.0,
+      "fixed_expense": 710000.0,
+      "expense_total": 819700.0,
+      "profit": 308660.0,
+      "real_profit": 232000.0
+    },
+    {
+      "date": "2026-03-11",
+      "status": "complete",
+      "note": "",
+      "income": 1019348.0,
+      "variable_expense": 571738.0,
+      "fixed_expense": 118000.0,
+      "expense_total": 689738.0,
+      "profit": 329610.0,
+      "real_profit": 252641.0
+    },
+    {
+      "date": "2026-03-12",
+      "status": "complete",
+      "note": "",
+      "income": 894428.0,
+      "variable_expense": 367901.0,
+      "fixed_expense": 258038.0,
+      "expense_total": 625939.0,
+      "profit": 268489.0,
+      "real_profit": 524624.0
+    },
+    {
+      "date": "2026-03-13",
+      "status": "complete",
+      "note": "",
+      "income": 988032.0,
+      "variable_expense": 730620.0,
+      "fixed_expense": 0.0,
+      "expense_total": 730620.0,
+      "profit": 257412.0,
+      "real_profit": 256050.0
+    },
+    {
+      "date": "2026-03-14",
+      "status": "complete",
+      "note": "",
+      "income": 551550.0,
+      "variable_expense": 0.0,
+      "fixed_expense": 1293000.0,
+      "expense_total": 1293000.0,
+      "profit": -741450.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-16",
+      "status": "complete",
+      "note": "",
+      "income": 700654.0,
+      "variable_expense": 234998.0,
+      "fixed_expense": 455000.0,
+      "expense_total": 689998.0,
+      "profit": 10656.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-17",
+      "status": "complete",
+      "note": "",
+      "income": 1073728.0,
+      "variable_expense": 544417.0,
+      "fixed_expense": 575400.0,
+      "expense_total": 1119817.0,
+      "profit": -46089.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-18",
+      "status": "draft",
+      "note": "",
+      "income": 1025682.0,
+      "variable_expense": 438814.0,
+      "fixed_expense": 270000.0,
+      "expense_total": 708814.0,
+      "profit": 316868.0,
+      "real_profit": 169193.0
+    },
+    {
+      "date": "2026-03-19",
+      "status": "complete",
+      "note": "",
+      "income": 954314.0,
+      "variable_expense": 417085.0,
+      "fixed_expense": 575000.0,
+      "expense_total": 992085.0,
+      "profit": -37771.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-20",
+      "status": "complete",
+      "note": "",
+      "income": 1445961.0,
+      "variable_expense": 407358.0,
+      "fixed_expense": 507200.0,
+      "expense_total": 914558.0,
+      "profit": 531403.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-21",
+      "status": "complete",
+      "note": "",
+      "income": 594122.0,
+      "variable_expense": 0.0,
+      "fixed_expense": 140000.0,
+      "expense_total": 140000.0,
+      "profit": 454122.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-23",
+      "status": "complete",
+      "note": "",
+      "income": 623142.0,
+      "variable_expense": 649451.0,
+      "fixed_expense": 30000.0,
+      "expense_total": 679451.0,
+      "profit": -56309.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-24",
+      "status": "complete",
+      "note": "",
+      "income": 480806.0,
+      "variable_expense": 6000.0,
+      "fixed_expense": 0.0,
+      "expense_total": 6000.0,
+      "profit": 474806.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-25",
+      "status": "complete",
+      "note": "",
+      "income": 952156.0,
+      "variable_expense": 408047.0,
+      "fixed_expense": 25000.0,
+      "expense_total": 433047.0,
+      "profit": 519109.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-26",
+      "status": "complete",
+      "note": "",
+      "income": 1003117.0,
+      "variable_expense": 641006.0,
+      "fixed_expense": 80000.0,
+      "expense_total": 721006.0,
+      "profit": 282111.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-27",
+      "status": "complete",
+      "note": "",
+      "income": 1130787.0,
+      "variable_expense": 279082.0,
+      "fixed_expense": 10000.0,
+      "expense_total": 289082.0,
+      "profit": 841705.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-28",
+      "status": "complete",
+      "note": "",
+      "income": 627827.0,
+      "variable_expense": 93000.0,
+      "fixed_expense": 822250.0,
+      "expense_total": 915250.0,
+      "profit": -287423.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-03-30",
+      "status": "complete",
+      "note": "",
+      "income": 645552.0,
+      "variable_expense": 481109.0,
+      "fixed_expense": 0.0,
+      "expense_total": 481109.0,
+      "profit": 164443.0,
+      "real_profit": 0.0
+    },
+    {
+      "date": "2026-04-01",
+      "status": "complete",
+      "note": "",
+      "income": 1131613.0,
+      "variable_expense": 367592.0,
+      "fixed_expense": 333221.0,
+      "expense_total": 700813.0,
+      "profit": 430800.0,
+      "real_profit": 300000.0
+    }
+  ],
+  "shifts": [
+    {
+      "date": "2026-03-02",
+      "shift": "Mañana",
+      "income": 243770.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-02",
+      "shift": "Tarde",
+      "income": 167862.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-03",
+      "shift": "Mañana",
+      "income": 435434.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-03",
+      "shift": "Tarde",
+      "income": 486084.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-04",
+      "shift": "Mañana",
+      "income": 408375.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-04",
+      "shift": "Tarde",
+      "income": 355864.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-05",
+      "shift": "Mañana",
+      "income": 507399.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-05",
+      "shift": "Tarde",
+      "income": 588773.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-06",
+      "shift": "Mañana",
+      "income": 366917.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-06",
+      "shift": "Tarde",
+      "income": 337360.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-07",
+      "shift": "Mañana",
+      "income": 328179.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-07",
+      "shift": "Tarde",
+      "income": 370143.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-09",
+      "shift": "Mañana",
+      "income": 401934.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-09",
+      "shift": "Tarde",
+      "income": 319940.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-10",
+      "shift": "Mañana",
+      "income": 478455.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-10",
+      "shift": "Tarde",
+      "income": 649905.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-11",
+      "shift": "Mañana",
+      "income": 501246.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-11",
+      "shift": "Tarde",
+      "income": 518102.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-12",
+      "shift": "Mañana",
+      "income": 364740.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-12",
+      "shift": "Tarde",
+      "income": 529688.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-13",
+      "shift": "Mañana",
+      "income": 385978.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-13",
+      "shift": "Tarde",
+      "income": 602054.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-14",
+      "shift": "Mañana",
+      "income": 336450.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-14",
+      "shift": "Tarde",
+      "income": 215100.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-16",
+      "shift": "Mañana",
+      "income": 316972.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-16",
+      "shift": "Tarde",
+      "income": 383682.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-17",
+      "shift": "Mañana",
+      "income": 413579.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-17",
+      "shift": "Tarde",
+      "income": 660149.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-18",
+      "shift": "Mañana",
+      "income": 515480.0,
+      "note": "",
+      "is_closed": false,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-18",
+      "shift": "Tarde",
+      "income": 510202.0,
+      "note": "",
+      "is_closed": false,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-19",
+      "shift": "Mañana",
+      "income": 465957.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-19",
+      "shift": "Tarde",
+      "income": 488357.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-20",
+      "shift": "Mañana",
+      "income": 656162.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-20",
+      "shift": "Tarde",
+      "income": 789799.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-21",
+      "shift": "Mañana",
+      "income": 225631.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-21",
+      "shift": "Tarde",
+      "income": 368491.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-23",
+      "shift": "Mañana",
+      "income": 206239.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-23",
+      "shift": "Tarde",
+      "income": 416903.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-24",
+      "shift": "Mañana",
+      "income": 229338.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-24",
+      "shift": "Tarde",
+      "income": 251468.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-25",
+      "shift": "Mañana",
+      "income": 391537.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-25",
+      "shift": "Tarde",
+      "income": 560619.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-26",
+      "shift": "Mañana",
+      "income": 572286.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-26",
+      "shift": "Tarde",
+      "income": 430831.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-27",
+      "shift": "Mañana",
+      "income": 599569.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-27",
+      "shift": "Tarde",
+      "income": 531218.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-28",
+      "shift": "Mañana",
+      "income": 304082.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-28",
+      "shift": "Tarde",
+      "income": 323745.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-30",
+      "shift": "Mañana",
+      "income": 346849.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-03-30",
+      "shift": "Tarde",
+      "income": 298703.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-04-01",
+      "shift": "Mañana",
+      "income": 522458.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    },
+    {
+      "date": "2026-04-01",
+      "shift": "Tarde",
+      "income": 609155.0,
+      "note": "",
+      "is_closed": true,
+      "legacy_variable_expense_total": 0.0,
+      "legacy_fixed_expense_total": 0.0
+    }
+  ],
+  "expenses": [
+    {
+      "date": "2026-03-02",
+      "kind": "variable",
+      "category_id": 2,
+      "category_name": "Matías (Sandwichs)",
+      "amount": 26800.0,
+      "note": "",
+      "created_at": "2026-03-03T12:21:38.574763"
+    },
+    {
+      "date": "2026-03-02",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 118360.0,
+      "note": "",
+      "created_at": "2026-03-03T12:21:55.395567"
+    },
+    {
+      "date": "2026-03-02",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 49634.0,
+      "note": "",
+      "created_at": "2026-03-03T12:22:07.438453"
+    },
+    {
+      "date": "2026-03-02",
+      "kind": "variable",
+      "category_id": 27,
+      "category_name": "La nueva cabaña",
+      "amount": 20620.0,
+      "note": "",
+      "created_at": "2026-03-03T12:23:24.778503"
+    },
+    {
+      "date": "2026-03-02",
+      "kind": "variable",
+      "category_id": 6,
+      "category_name": "Valeria (Productos sin TACC)",
+      "amount": 96000.0,
+      "note": "",
+      "created_at": "2026-03-03T12:23:34.942967"
+    },
+    {
+      "date": "2026-03-02",
+      "kind": "fixed",
+      "category_id": 12,
+      "category_name": "Andrea",
+      "amount": 10000.0,
+      "note": "",
+      "created_at": "2026-03-04T20:25:36.782824"
+    },
+    {
+      "date": "2026-03-02",
+      "kind": "fixed",
+      "category_id": 13,
+      "category_name": "Ana",
+      "amount": 8000.0,
+      "note": "",
+      "created_at": "2026-03-04T20:25:47.910808"
+    },
+    {
+      "date": "2026-03-02",
+      "kind": "variable",
+      "category_id": 10,
+      "category_name": "Angeleri",
+      "amount": 150000.0,
+      "note": "",
+      "created_at": "2026-03-05T20:33:29.237228"
+    },
+    {
+      "date": "2026-03-03",
+      "kind": "variable",
+      "category_id": 5,
+      "category_name": "Ailín (Cookies sin TACC)",
+      "amount": 70800.0,
+      "note": "",
+      "created_at": "2026-03-04T20:29:02.814037"
+    },
+    {
+      "date": "2026-03-03",
+      "kind": "variable",
+      "category_id": 3,
+      "category_name": "Giovanna (Cookies)",
+      "amount": 95100.0,
+      "note": "",
+      "created_at": "2026-03-04T20:29:12.342054"
+    },
+    {
+      "date": "2026-03-03",
+      "kind": "variable",
+      "category_id": 28,
+      "category_name": "Tu Postre",
+      "amount": 60000.0,
+      "note": "",
+      "created_at": "2026-03-05T20:35:59.518776"
+    },
+    {
+      "date": "2026-03-04",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 231551.0,
+      "note": "",
+      "created_at": "2026-03-05T20:37:47.525958"
+    },
+    {
+      "date": "2026-03-04",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 21829.0,
+      "note": "",
+      "created_at": "2026-03-05T20:37:57.043760"
+    },
+    {
+      "date": "2026-03-04",
+      "kind": "variable",
+      "category_id": 6,
+      "category_name": "Valeria (Productos sin TACC)",
+      "amount": 96000.0,
+      "note": "",
+      "created_at": "2026-03-05T20:38:05.901140"
+    },
+    {
+      "date": "2026-03-04",
+      "kind": "fixed",
+      "category_id": 12,
+      "category_name": "Andrea",
+      "amount": 14000.0,
+      "note": "",
+      "created_at": "2026-03-05T20:38:18.831851"
+    },
+    {
+      "date": "2026-03-05",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 131840.0,
+      "note": "",
+      "created_at": "2026-03-09T12:57:16.517178"
+    },
+    {
+      "date": "2026-03-05",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 63236.0,
+      "note": "",
+      "created_at": "2026-03-09T12:57:28.855477"
+    },
+    {
+      "date": "2026-03-05",
+      "kind": "variable",
+      "category_id": 8,
+      "category_name": "Matías (Descartables)",
+      "amount": 92510.0,
+      "note": "",
+      "created_at": "2026-03-09T12:58:07.031225"
+    },
+    {
+      "date": "2026-03-05",
+      "kind": "variable",
+      "category_id": 10,
+      "category_name": "Angeleri",
+      "amount": 150020.0,
+      "note": "",
+      "created_at": "2026-03-09T12:58:20.110110"
+    },
+    {
+      "date": "2026-03-05",
+      "kind": "fixed",
+      "category_id": 18,
+      "category_name": "Adelanto Sofía",
+      "amount": 90000.0,
+      "note": "",
+      "created_at": "2026-03-09T12:58:33.604352"
+    },
+    {
+      "date": "2026-03-05",
+      "kind": "fixed",
+      "category_id": 16,
+      "category_name": "Adelanto Matías",
+      "amount": 50000.0,
+      "note": "",
+      "created_at": "2026-03-09T12:58:44.079466"
+    },
+    {
+      "date": "2026-03-05",
+      "kind": "variable",
+      "category_id": 21,
+      "category_name": "Coca Cola",
+      "amount": 66310.0,
+      "note": "",
+      "created_at": "2026-03-09T12:58:57.664074"
+    },
+    {
+      "date": "2026-03-05",
+      "kind": "variable",
+      "category_id": 9,
+      "category_name": "Varios",
+      "amount": 18250.0,
+      "note": "Angel",
+      "created_at": "2026-03-09T12:59:24.428078"
+    },
+    {
+      "date": "2026-03-05",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 365200.0,
+      "note": "",
+      "created_at": "2026-03-09T12:59:34.106527"
+    },
+    {
+      "date": "2026-03-06",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 311037.0,
+      "note": "",
+      "created_at": "2026-03-09T13:54:04.973124"
+    },
+    {
+      "date": "2026-03-06",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 33540.0,
+      "note": "",
+      "created_at": "2026-03-09T13:54:15.303519"
+    },
+    {
+      "date": "2026-03-06",
+      "kind": "variable",
+      "category_id": 21,
+      "category_name": "Coca Cola",
+      "amount": 66310.0,
+      "note": "",
+      "created_at": "2026-03-09T13:54:25.745459"
+    },
+    {
+      "date": "2026-03-06",
+      "kind": "variable",
+      "category_id": 6,
+      "category_name": "Valeria (Productos sin TACC)",
+      "amount": 93000.0,
+      "note": "",
+      "created_at": "2026-03-09T13:54:39.338564"
+    },
+    {
+      "date": "2026-03-06",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 257000.0,
+      "note": "",
+      "created_at": "2026-03-09T13:54:51.068185"
+    },
+    {
+      "date": "2026-03-07",
+      "kind": "fixed",
+      "category_id": 11,
+      "category_name": "Adelanto Paula",
+      "amount": 60000.0,
+      "note": "",
+      "created_at": "2026-03-11T12:38:54.258958"
+    },
+    {
+      "date": "2026-03-07",
+      "kind": "fixed",
+      "category_id": 12,
+      "category_name": "Andrea",
+      "amount": 10000.0,
+      "note": "",
+      "created_at": "2026-03-11T12:39:03.004228"
+    },
+    {
+      "date": "2026-03-07",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 420700.0,
+      "note": "",
+      "created_at": "2026-03-11T12:39:14.930952"
+    },
+    {
+      "date": "2026-03-09",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 215349.0,
+      "note": "",
+      "created_at": "2026-03-11T15:07:03.195499"
+    },
+    {
+      "date": "2026-03-09",
+      "kind": "variable",
+      "category_id": 2,
+      "category_name": "Matías (Sandwichs)",
+      "amount": 21000.0,
+      "note": "",
+      "created_at": "2026-03-11T15:07:10.427881"
+    },
+    {
+      "date": "2026-03-09",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 43168.0,
+      "note": "",
+      "created_at": "2026-03-11T15:07:21.236769"
+    },
+    {
+      "date": "2026-03-09",
+      "kind": "variable",
+      "category_id": 6,
+      "category_name": "Valeria (Productos sin TACC)",
+      "amount": 141000.0,
+      "note": "",
+      "created_at": "2026-03-11T15:07:33.043508"
+    },
+    {
+      "date": "2026-03-09",
+      "kind": "fixed",
+      "category_id": 15,
+      "category_name": "Adelanto Lautaro",
+      "amount": 100000.0,
+      "note": "",
+      "created_at": "2026-03-11T15:07:41.721412"
+    },
+    {
+      "date": "2026-03-09",
+      "kind": "fixed",
+      "category_id": 18,
+      "category_name": "Adelanto Sofía",
+      "amount": 80000.0,
+      "note": "",
+      "created_at": "2026-03-11T15:07:49.146233"
+    },
+    {
+      "date": "2026-03-09",
+      "kind": "fixed",
+      "category_id": 20,
+      "category_name": "Adelanto Pato",
+      "amount": 80000.0,
+      "note": "",
+      "created_at": "2026-03-11T15:07:57.057184"
+    },
+    {
+      "date": "2026-03-09",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 65366.0,
+      "note": "",
+      "created_at": "2026-03-11T15:08:14.932084"
+    },
+    {
+      "date": "2026-03-10",
+      "kind": "variable",
+      "category_id": 3,
+      "category_name": "Giovanna (Cookies)",
+      "amount": 109700.0,
+      "note": "",
+      "created_at": "2026-03-12T15:53:32.565952"
+    },
+    {
+      "date": "2026-03-10",
+      "kind": "fixed",
+      "category_id": 19,
+      "category_name": "Alquiler Local",
+      "amount": 710000.0,
+      "note": "",
+      "created_at": "2026-03-12T15:53:44.063351"
+    },
+    {
+      "date": "2026-03-11",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 336224.0,
+      "note": "",
+      "created_at": "2026-03-12T15:55:39.063569"
+    },
+    {
+      "date": "2026-03-11",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 111514.0,
+      "note": "",
+      "created_at": "2026-03-12T15:55:51.121515"
+    },
+    {
+      "date": "2026-03-11",
+      "kind": "fixed",
+      "category_id": 29,
+      "category_name": "Desinfección (Nico)",
+      "amount": 38000.0,
+      "note": "",
+      "created_at": "2026-03-12T15:56:16.856854"
+    },
+    {
+      "date": "2026-03-11",
+      "kind": "variable",
+      "category_id": 2,
+      "category_name": "Matías (Sandwichs)",
+      "amount": 28000.0,
+      "note": "",
+      "created_at": "2026-03-12T15:56:31.170618"
+    },
+    {
+      "date": "2026-03-11",
+      "kind": "variable",
+      "category_id": 6,
+      "category_name": "Valeria (Productos sin TACC)",
+      "amount": 96000.0,
+      "note": "",
+      "created_at": "2026-03-12T15:56:39.214524"
+    },
+    {
+      "date": "2026-03-11",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 80000.0,
+      "note": "",
+      "created_at": "2026-03-12T15:56:53.256502"
+    },
+    {
+      "date": "2026-03-12",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 196611.0,
+      "note": "",
+      "created_at": "2026-03-13T14:45:10.588854"
+    },
+    {
+      "date": "2026-03-12",
+      "kind": "variable",
+      "category_id": 8,
+      "category_name": "Matías (Descartables)",
+      "amount": 100490.0,
+      "note": "",
+      "created_at": "2026-03-13T14:45:19.759012"
+    },
+    {
+      "date": "2026-03-12",
+      "kind": "variable",
+      "category_id": 5,
+      "category_name": "Ailín (Cookies sin TACC)",
+      "amount": 70800.0,
+      "note": "",
+      "created_at": "2026-03-13T14:45:28.672279"
+    },
+    {
+      "date": "2026-03-12",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 258038.0,
+      "note": "",
+      "created_at": "2026-03-13T14:46:04.628274"
+    },
+    {
+      "date": "2026-03-13",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 366016.0,
+      "note": "",
+      "created_at": "2026-03-17T12:39:13.266185"
+    },
+    {
+      "date": "2026-03-13",
+      "kind": "variable",
+      "category_id": 21,
+      "category_name": "Coca Cola",
+      "amount": 41420.0,
+      "note": "",
+      "created_at": "2026-03-17T12:39:21.631219"
+    },
+    {
+      "date": "2026-03-13",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 69503.0,
+      "note": "",
+      "created_at": "2026-03-17T12:39:31.979354"
+    },
+    {
+      "date": "2026-03-13",
+      "kind": "variable",
+      "category_id": 6,
+      "category_name": "Valeria (Productos sin TACC)",
+      "amount": 54000.0,
+      "note": "",
+      "created_at": "2026-03-17T12:39:42.777147"
+    },
+    {
+      "date": "2026-03-13",
+      "kind": "variable",
+      "category_id": 10,
+      "category_name": "Angeleri",
+      "amount": 157681.0,
+      "note": "",
+      "created_at": "2026-03-17T12:39:53.199267"
+    },
+    {
+      "date": "2026-03-13",
+      "kind": "variable",
+      "category_id": 17,
+      "category_name": "La Pana",
+      "amount": 42000.0,
+      "note": "",
+      "created_at": "2026-03-17T12:39:59.320810"
+    },
+    {
+      "date": "2026-03-14",
+      "kind": "fixed",
+      "category_id": 22,
+      "category_name": "Sueldos",
+      "amount": 895000.0,
+      "note": "",
+      "created_at": "2026-03-17T12:42:11.851491"
+    },
+    {
+      "date": "2026-03-14",
+      "kind": "fixed",
+      "category_id": 13,
+      "category_name": "Ana",
+      "amount": 8000.0,
+      "note": "",
+      "created_at": "2026-03-17T12:42:19.466222"
+    },
+    {
+      "date": "2026-03-14",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 390000.0,
+      "note": "",
+      "created_at": "2026-03-17T12:42:38.066353"
+    },
+    {
+      "date": "2026-03-16",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 190259.0,
+      "note": "",
+      "created_at": "2026-03-17T12:45:12.822092"
+    },
+    {
+      "date": "2026-03-16",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 44739.0,
+      "note": "",
+      "created_at": "2026-03-17T12:45:22.764796"
+    },
+    {
+      "date": "2026-03-16",
+      "kind": "fixed",
+      "category_id": 18,
+      "category_name": "Adelanto Sofía",
+      "amount": 55000.0,
+      "note": "",
+      "created_at": "2026-03-17T12:45:30.099430"
+    },
+    {
+      "date": "2026-03-16",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 400000.0,
+      "note": "",
+      "created_at": "2026-03-17T12:45:50.070967"
+    },
+    {
+      "date": "2026-03-17",
+      "kind": "variable",
+      "category_id": 6,
+      "category_name": "Valeria (Productos sin TACC)",
+      "amount": 96000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:06:19.722046"
+    },
+    {
+      "date": "2026-03-17",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 175950.0,
+      "note": "",
+      "created_at": "2026-03-26T18:07:05.181437"
+    },
+    {
+      "date": "2026-03-17",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 22267.0,
+      "note": "",
+      "created_at": "2026-03-26T18:07:17.883462"
+    },
+    {
+      "date": "2026-03-17",
+      "kind": "variable",
+      "category_id": 2,
+      "category_name": "Matías (Sandwichs)",
+      "amount": 28000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:07:25.910302"
+    },
+    {
+      "date": "2026-03-17",
+      "kind": "variable",
+      "category_id": 3,
+      "category_name": "Giovanna (Cookies)",
+      "amount": 109700.0,
+      "note": "",
+      "created_at": "2026-03-26T18:07:39.070592"
+    },
+    {
+      "date": "2026-03-17",
+      "kind": "variable",
+      "category_id": 10,
+      "category_name": "Angeleri",
+      "amount": 112500.0,
+      "note": "",
+      "created_at": "2026-03-26T18:08:04.483244"
+    },
+    {
+      "date": "2026-03-17",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 575400.0,
+      "note": "",
+      "created_at": "2026-03-26T18:08:12.890179"
+    },
+    {
+      "date": "2026-03-18",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 63236.0,
+      "note": "",
+      "created_at": "2026-03-26T18:13:52.455031"
+    },
+    {
+      "date": "2026-03-18",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 331812.0,
+      "note": "",
+      "created_at": "2026-03-26T18:14:00.573611"
+    },
+    {
+      "date": "2026-03-18",
+      "kind": "variable",
+      "category_id": 9,
+      "category_name": "Varios",
+      "amount": 32000.0,
+      "note": "Farmacia",
+      "created_at": "2026-03-26T18:14:13.062477"
+    },
+    {
+      "date": "2026-03-18",
+      "kind": "variable",
+      "category_id": 9,
+      "category_name": "Varios",
+      "amount": 11766.0,
+      "note": "Valentino",
+      "created_at": "2026-03-26T18:14:31.245964"
+    },
+    {
+      "date": "2026-03-18",
+      "kind": "fixed",
+      "category_id": 20,
+      "category_name": "Adelanto Pato",
+      "amount": 55000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:14:38.067727"
+    },
+    {
+      "date": "2026-03-18",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 215000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:15:11.552568"
+    },
+    {
+      "date": "2026-03-19",
+      "kind": "variable",
+      "category_id": 6,
+      "category_name": "Valeria (Productos sin TACC)",
+      "amount": 48000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:18:07.850265"
+    },
+    {
+      "date": "2026-03-19",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 131894.0,
+      "note": "",
+      "created_at": "2026-03-26T18:18:16.747019"
+    },
+    {
+      "date": "2026-03-19",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 47751.0,
+      "note": "",
+      "created_at": "2026-03-26T18:18:26.304336"
+    },
+    {
+      "date": "2026-03-19",
+      "kind": "variable",
+      "category_id": 2,
+      "category_name": "Matías (Sandwichs)",
+      "amount": 28000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:18:34.372646"
+    },
+    {
+      "date": "2026-03-19",
+      "kind": "variable",
+      "category_id": 8,
+      "category_name": "Matías (Descartables)",
+      "amount": 61440.0,
+      "note": "",
+      "created_at": "2026-03-26T18:18:42.897607"
+    },
+    {
+      "date": "2026-03-19",
+      "kind": "fixed",
+      "category_id": 15,
+      "category_name": "Adelanto Lautaro",
+      "amount": 40000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:18:50.075609"
+    },
+    {
+      "date": "2026-03-19",
+      "kind": "fixed",
+      "category_id": 18,
+      "category_name": "Adelanto Sofía",
+      "amount": 35000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:18:59.490546"
+    },
+    {
+      "date": "2026-03-19",
+      "kind": "variable",
+      "category_id": 9,
+      "category_name": "Varios",
+      "amount": 30000.0,
+      "note": "Venta Mayorista Paula",
+      "created_at": "2026-03-26T18:19:13.244527"
+    },
+    {
+      "date": "2026-03-19",
+      "kind": "variable",
+      "category_id": 5,
+      "category_name": "Ailín (Cookies sin TACC)",
+      "amount": 70000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:19:19.205413"
+    },
+    {
+      "date": "2026-03-19",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 500000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:19:35.184907"
+    },
+    {
+      "date": "2026-03-20",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 215358.0,
+      "note": "",
+      "created_at": "2026-03-26T18:23:20.652883"
+    },
+    {
+      "date": "2026-03-20",
+      "kind": "variable",
+      "category_id": 17,
+      "category_name": "La Pana",
+      "amount": 27000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:23:28.431463"
+    },
+    {
+      "date": "2026-03-20",
+      "kind": "variable",
+      "category_id": 30,
+      "category_name": "Matías (Churros)",
+      "amount": 8000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:23:54.234395"
+    },
+    {
+      "date": "2026-03-20",
+      "kind": "variable",
+      "category_id": 10,
+      "category_name": "Angeleri",
+      "amount": 157000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:24:02.707171"
+    },
+    {
+      "date": "2026-03-20",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 507200.0,
+      "note": "",
+      "created_at": "2026-03-26T18:24:14.825088"
+    },
+    {
+      "date": "2026-03-21",
+      "kind": "fixed",
+      "category_id": 20,
+      "category_name": "Adelanto Pato",
+      "amount": 15000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:25:17.293791"
+    },
+    {
+      "date": "2026-03-21",
+      "kind": "fixed",
+      "category_id": 12,
+      "category_name": "Andrea",
+      "amount": 10000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:25:25.183739"
+    },
+    {
+      "date": "2026-03-21",
+      "kind": "fixed",
+      "category_id": 13,
+      "category_name": "Ana",
+      "amount": 8000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:25:31.767528"
+    },
+    {
+      "date": "2026-03-21",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 107000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:25:40.278696"
+    },
+    {
+      "date": "2026-03-23",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 281566.0,
+      "note": "",
+      "created_at": "2026-03-26T18:26:37.400080"
+    },
+    {
+      "date": "2026-03-23",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 72804.0,
+      "note": "",
+      "created_at": "2026-03-26T18:26:44.138678"
+    },
+    {
+      "date": "2026-03-23",
+      "kind": "variable",
+      "category_id": 10,
+      "category_name": "Angeleri",
+      "amount": 157681.0,
+      "note": "",
+      "created_at": "2026-03-26T18:26:54.639126"
+    },
+    {
+      "date": "2026-03-23",
+      "kind": "variable",
+      "category_id": 6,
+      "category_name": "Valeria (Productos sin TACC)",
+      "amount": 102000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:27:05.067055"
+    },
+    {
+      "date": "2026-03-23",
+      "kind": "fixed",
+      "category_id": 16,
+      "category_name": "Adelanto Matías",
+      "amount": 30000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:27:11.136892"
+    },
+    {
+      "date": "2026-03-23",
+      "kind": "variable",
+      "category_id": 17,
+      "category_name": "La Pana",
+      "amount": 35400.0,
+      "note": "",
+      "created_at": "2026-03-26T18:27:18.416669"
+    },
+    {
+      "date": "2026-03-24",
+      "kind": "variable",
+      "category_id": 30,
+      "category_name": "Matías (Churros)",
+      "amount": 6000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:28:36.952082"
+    },
+    {
+      "date": "2026-03-25",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 237660.0,
+      "note": "",
+      "created_at": "2026-03-26T18:29:20.502189"
+    },
+    {
+      "date": "2026-03-25",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 54687.0,
+      "note": "",
+      "created_at": "2026-03-26T18:29:31.644102"
+    },
+    {
+      "date": "2026-03-25",
+      "kind": "fixed",
+      "category_id": 20,
+      "category_name": "Adelanto Pato",
+      "amount": 25000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:29:39.749398"
+    },
+    {
+      "date": "2026-03-25",
+      "kind": "variable",
+      "category_id": 30,
+      "category_name": "Matías (Churros)",
+      "amount": 6000.0,
+      "note": "",
+      "created_at": "2026-03-26T18:29:53.465839"
+    },
+    {
+      "date": "2026-03-25",
+      "kind": "variable",
+      "category_id": 3,
+      "category_name": "Giovanna (Cookies)",
+      "amount": 109700.0,
+      "note": "",
+      "created_at": "2026-03-26T18:30:02.518746"
+    },
+    {
+      "date": "2026-03-26",
+      "kind": "variable",
+      "category_id": 2,
+      "category_name": "Matías (Sandwichs)",
+      "amount": 29600.0,
+      "note": "",
+      "created_at": "2026-03-27T13:42:05.510725"
+    },
+    {
+      "date": "2026-03-26",
+      "kind": "variable",
+      "category_id": 6,
+      "category_name": "Valeria (Productos sin TACC)",
+      "amount": 59000.0,
+      "note": "",
+      "created_at": "2026-03-27T13:42:15.138553"
+    },
+    {
+      "date": "2026-03-26",
+      "kind": "variable",
+      "category_id": 8,
+      "category_name": "Matías (Descartables)",
+      "amount": 76850.0,
+      "note": "",
+      "created_at": "2026-03-27T13:42:21.909030"
+    },
+    {
+      "date": "2026-03-26",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 404756.0,
+      "note": "",
+      "created_at": "2026-03-27T13:42:30.461234"
+    },
+    {
+      "date": "2026-03-26",
+      "kind": "variable",
+      "category_id": 5,
+      "category_name": "Ailín (Cookies sin TACC)",
+      "amount": 70800.0,
+      "note": "",
+      "created_at": "2026-03-27T13:42:45.263900"
+    },
+    {
+      "date": "2026-03-26",
+      "kind": "fixed",
+      "category_id": 18,
+      "category_name": "Adelanto Sofía",
+      "amount": 30000.0,
+      "note": "",
+      "created_at": "2026-03-27T13:42:52.356352"
+    },
+    {
+      "date": "2026-03-26",
+      "kind": "fixed",
+      "category_id": 11,
+      "category_name": "Adelanto Paula",
+      "amount": 50000.0,
+      "note": "",
+      "created_at": "2026-03-27T13:42:59.639992"
+    },
+    {
+      "date": "2026-03-27",
+      "kind": "variable",
+      "category_id": 9,
+      "category_name": "Varios",
+      "amount": 20000.0,
+      "note": "Arreglo ralladora",
+      "created_at": "2026-04-02T13:22:31.568232"
+    },
+    {
+      "date": "2026-03-27",
+      "kind": "variable",
+      "category_id": 30,
+      "category_name": "Matías (Churros)",
+      "amount": 6000.0,
+      "note": "",
+      "created_at": "2026-04-02T13:22:41.105710"
+    },
+    {
+      "date": "2026-03-27",
+      "kind": "fixed",
+      "category_id": 12,
+      "category_name": "Andrea",
+      "amount": 10000.0,
+      "note": "",
+      "created_at": "2026-04-02T13:22:50.944560"
+    },
+    {
+      "date": "2026-03-27",
+      "kind": "variable",
+      "category_id": 4,
+      "category_name": "Cangiano",
+      "amount": 88464.0,
+      "note": "",
+      "created_at": "2026-04-02T13:23:06.337998"
+    },
+    {
+      "date": "2026-03-27",
+      "kind": "variable",
+      "category_id": 21,
+      "category_name": "Coca Cola",
+      "amount": 92620.0,
+      "note": "",
+      "created_at": "2026-04-02T13:23:16.035834"
+    },
+    {
+      "date": "2026-03-27",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 71998.0,
+      "note": "",
+      "created_at": "2026-04-02T13:23:29.712134"
+    },
+    {
+      "date": "2026-03-28",
+      "kind": "variable",
+      "category_id": 6,
+      "category_name": "Valeria (Productos sin TACC)",
+      "amount": 87000.0,
+      "note": "",
+      "created_at": "2026-04-02T13:26:33.931342"
+    },
+    {
+      "date": "2026-03-28",
+      "kind": "variable",
+      "category_id": 30,
+      "category_name": "Matías (Churros)",
+      "amount": 6000.0,
+      "note": "",
+      "created_at": "2026-04-02T13:26:47.289129"
+    },
+    {
+      "date": "2026-03-28",
+      "kind": "fixed",
+      "category_id": 22,
+      "category_name": "Sueldos",
+      "amount": 822250.0,
+      "note": "",
+      "created_at": "2026-04-02T13:27:01.177843"
+    },
+    {
+      "date": "2026-03-30",
+      "kind": "variable",
+      "category_id": 30,
+      "category_name": "Matías (Churros)",
+      "amount": 6000.0,
+      "note": "",
+      "created_at": "2026-04-02T13:42:57.703253"
+    },
+    {
+      "date": "2026-03-30",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 252328.0,
+      "note": "",
+      "created_at": "2026-04-02T13:43:06.604842"
+    },
+    {
+      "date": "2026-03-30",
+      "kind": "variable",
+      "category_id": 9,
+      "category_name": "Varios",
+      "amount": 65100.0,
+      "note": "Gráfica",
+      "created_at": "2026-04-02T13:43:16.743869"
+    },
+    {
+      "date": "2026-03-30",
+      "kind": "variable",
+      "category_id": 10,
+      "category_name": "Angeleri",
+      "amount": 157681.0,
+      "note": "",
+      "created_at": "2026-04-02T13:43:26.965775"
+    },
+    {
+      "date": "2026-04-01",
+      "kind": "variable",
+      "category_id": 1,
+      "category_name": "Lorsani",
+      "amount": 194892.0,
+      "note": "",
+      "created_at": "2026-04-02T13:47:53.062571"
+    },
+    {
+      "date": "2026-04-01",
+      "kind": "variable",
+      "category_id": 3,
+      "category_name": "Giovanna (Cookies)",
+      "amount": 130700.0,
+      "note": "",
+      "created_at": "2026-04-02T13:48:00.209372"
+    },
+    {
+      "date": "2026-04-01",
+      "kind": "fixed",
+      "category_id": 11,
+      "category_name": "Adelanto Paula",
+      "amount": 65000.0,
+      "note": "",
+      "created_at": "2026-04-02T13:48:08.212563"
+    },
+    {
+      "date": "2026-04-01",
+      "kind": "variable",
+      "category_id": 17,
+      "category_name": "La Pana",
+      "amount": 42000.0,
+      "note": "",
+      "created_at": "2026-04-02T13:48:16.793801"
+    },
+    {
+      "date": "2026-04-01",
+      "kind": "fixed",
+      "category_id": 12,
+      "category_name": "Andrea",
+      "amount": 30000.0,
+      "note": "",
+      "created_at": "2026-04-02T13:48:25.171959"
+    },
+    {
+      "date": "2026-04-01",
+      "kind": "fixed",
+      "category_id": 7,
+      "category_name": "Sueldo Ximena",
+      "amount": 238221.0,
+      "note": "",
+      "created_at": "2026-04-02T13:57:57.173721"
+    }
+  ],
+  "categories": [
+    {
+      "id": 15,
+      "kind": "fixed",
+      "name": "Adelanto Lautaro",
+      "created_at": "2026-02-24T19:25:08.088133"
+    },
+    {
+      "id": 16,
+      "kind": "fixed",
+      "name": "Adelanto Matías",
+      "created_at": "2026-02-24T19:25:37.877339"
+    },
+    {
+      "id": 20,
+      "kind": "fixed",
+      "name": "Adelanto Pato",
+      "created_at": "2026-02-24T19:35:56.809527"
+    },
+    {
+      "id": 11,
+      "kind": "fixed",
+      "name": "Adelanto Paula",
+      "created_at": "2026-02-24T19:23:41.300018"
+    },
+    {
+      "id": 18,
+      "kind": "fixed",
+      "name": "Adelanto Sofía",
+      "created_at": "2026-02-24T19:28:49.668313"
+    },
+    {
+      "id": 19,
+      "kind": "fixed",
+      "name": "Alquiler Local",
+      "created_at": "2026-02-24T19:29:48.606858"
+    },
+    {
+      "id": 13,
+      "kind": "fixed",
+      "name": "Ana",
+      "created_at": "2026-02-24T19:24:13.018381"
+    },
+    {
+      "id": 12,
+      "kind": "fixed",
+      "name": "Andrea",
+      "created_at": "2026-02-24T19:23:57.529700"
+    },
+    {
+      "id": 29,
+      "kind": "fixed",
+      "name": "Desinfección (Nico)",
+      "created_at": "2026-03-12T15:56:07.736509"
+    },
+    {
+      "id": 24,
+      "kind": "fixed",
+      "name": "Personal",
+      "created_at": "2026-02-25T12:26:23.119805"
+    },
+    {
+      "id": 23,
+      "kind": "fixed",
+      "name": "San Luis a 1000",
+      "created_at": "2026-02-24T19:41:24.475664"
+    },
+    {
+      "id": 25,
+      "kind": "fixed",
+      "name": "Seguro Área Protegida",
+      "created_at": "2026-02-25T19:56:17.381935"
+    },
+    {
+      "id": 22,
+      "kind": "fixed",
+      "name": "Sueldos",
+      "created_at": "2026-02-24T19:38:16.366313"
+    },
+    {
+      "id": 7,
+      "kind": "fixed",
+      "name": "Sueldo Ximena",
+      "created_at": "2026-02-24T19:18:46.630031"
+    },
+    {
+      "id": 26,
+      "kind": "fixed",
+      "name": "Verónica (Contadora)",
+      "created_at": "2026-02-25T19:59:24.832776"
+    },
+    {
+      "id": 5,
+      "kind": "variable",
+      "name": "Ailín (Cookies sin TACC)",
+      "created_at": "2026-02-24T19:18:05.037844"
+    },
+    {
+      "id": 10,
+      "kind": "variable",
+      "name": "Angeleri",
+      "created_at": "2026-02-24T19:21:23.225344"
+    },
+    {
+      "id": 4,
+      "kind": "variable",
+      "name": "Cangiano",
+      "created_at": "2026-02-24T19:17:40.478255"
+    },
+    {
+      "id": 21,
+      "kind": "variable",
+      "name": "Coca Cola",
+      "created_at": "2026-02-24T19:36:50.284208"
+    },
+    {
+      "id": 3,
+      "kind": "variable",
+      "name": "Giovanna (Cookies)",
+      "created_at": "2026-02-24T19:17:22.272529"
+    },
+    {
+      "id": 27,
+      "kind": "variable",
+      "name": "La nueva cabaña",
+      "created_at": "2026-03-03T12:23:14.324232"
+    },
+    {
+      "id": 17,
+      "kind": "variable",
+      "name": "La Pana",
+      "created_at": "2026-02-24T19:25:56.183124"
+    },
+    {
+      "id": 1,
+      "kind": "variable",
+      "name": "Lorsani",
+      "created_at": "2026-02-22T14:40:54.959237"
+    },
+    {
+      "id": 30,
+      "kind": "variable",
+      "name": "Matías (Churros)",
+      "created_at": "2026-03-26T18:23:47.449712"
+    },
+    {
+      "id": 8,
+      "kind": "variable",
+      "name": "Matías (Descartables)",
+      "created_at": "2026-02-24T19:20:35.059673"
+    },
+    {
+      "id": 2,
+      "kind": "variable",
+      "name": "Matías (Sandwichs)",
+      "created_at": "2026-02-24T19:16:39.178906"
+    },
+    {
+      "id": 28,
+      "kind": "variable",
+      "name": "Tu Postre",
+      "created_at": "2026-03-05T20:35:48.031101"
+    },
+    {
+      "id": 6,
+      "kind": "variable",
+      "name": "Valeria (Productos sin TACC)",
+      "created_at": "2026-02-24T19:18:27.639320"
+    },
+    {
+      "id": 9,
+      "kind": "variable",
+      "name": "Varios",
+      "created_at": "2026-02-24T19:20:54.500831"
+    }
+  ]
+}

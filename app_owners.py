@@ -121,6 +121,7 @@ def ensure_schema():
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_profit DOUBLE PRECISION;"))
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_cash_profit DOUBLE PRECISION;"))
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_digital_profit DOUBLE PRECISION;"))
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_apps_pending DOUBLE PRECISION;"))
             db.session.commit()
             return
 
@@ -133,10 +134,13 @@ def ensure_schema():
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_cash_profit REAL;"))
         if "real_digital_profit" not in existing:
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_digital_profit REAL;"))
+        if "real_apps_pending" not in existing:
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_apps_pending REAL;"))
 
         db.session.commit()
-    except Exception:
+    except Exception as e:
         db.session.rollback()
+        print("ERROR ensure_schema:", e)
 
 
 def range_series(d1: date, d2: date):

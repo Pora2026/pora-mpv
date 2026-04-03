@@ -38,6 +38,7 @@ def _money_input(v):
 def _real_parts(bday):
     cash = getattr(bday, "real_cash_profit", None)
     digital = getattr(bday, "real_digital_profit", None)
+    apps = getattr(bday, "real_apps_pending", None)
     legacy = getattr(bday, "real_profit", None)
 
     if cash is None and digital is None and legacy is not None:
@@ -48,7 +49,11 @@ def _real_parts(bday):
     if cash is not None or digital is not None:
         total = float(cash or 0.0) + float(digital or 0.0)
 
-    return cash, digital, total
+    explained_total = None
+    if total is not None or apps is not None:
+        explained_total = float(total or 0.0) + float(apps or 0.0)
+
+    return cash, digital, apps, total, explained_total
 
 
 def _delta_bucket(calc, total):
@@ -68,6 +73,24 @@ def _total_html(calc, total):
         return "<span class='muted'>—</span>"
     klass, label = _delta_bucket(calc, total)
     return f"<span class='pill {klass}'>{label}</span>"
+
+
+def _explained_html(calc, explained_total):
+    if explained_total is None:
+        return "<span class='muted'>—</span>"
+    delta = float(explained_total) - float(calc)
+    ad = abs(delta)
+    cls = "ok" if ad <= 30000 else ("warn" if ad <= 60000 else "bad")
+    return f"<span class='pill {cls}'>{ars(explained_total)}</span>"
+
+
+def _desfasaje_html(calc, explained_total):
+    if explained_total is None:
+        return "<span class='muted'>—</span>"
+    diff = float(calc) - float(explained_total)
+    ad = abs(diff)
+    cls = "ok" if ad <= 30000 else ("warn" if ad <= 60000 else "bad")
+    return f"<span class='pill {cls}'>{ars(diff)}</span>"
 
 
 @dashboard_bp.get("/finanzas")
@@ -113,9 +136,6 @@ def dashboard_finanzas():
         .scalar()
         or 0.0
     )
-
-    SUELDO_XIMENA_META = 3_000_000
-    sueldo_restante = SUELDO_XIMENA_META - float(sueldo_ximena or 0.0)
 
     existing_days = {parse_ymd(x["date"]) for x in series}
     missing_days = [d for d in iter_workdays(d1, d2) if d not in existing_days]
@@ -222,6 +242,7 @@ def dashboard_finanzas():
 
     cmp_rows = []
     real_accum = 0.0
+    real_fina_accum = 0.0
     calc_accum_running = 0.0
     real_accum_running = 0.0
     cmp_dates = []
@@ -238,15 +259,20 @@ def dashboard_finanzas():
             recalc_day_status(b)
             t = day_totals(b)
             calc = float(t["profit"])
-            cash, digital, total = _real_parts(b)
+            cash, digital, apps, total, explained_total = _real_parts(b)
         else:
             calc = 0.0
             cash = None
             digital = None
+            apps = None
             total = None
+            explained_total = None
 
         if total is not None:
             real_accum += float(total)
+
+        if explained_total is not None:
+            real_fina_accum += float(explained_total)
 
         cmp_rows.append(
             {
@@ -256,7 +282,9 @@ def dashboard_finanzas():
                 "calc": calc,
                 "cash": cash,
                 "digital": digital,
+                "apps": apps,
                 "real_total": total,
+                "explained_total": explained_total,
             }
         )
 
@@ -280,12 +308,25 @@ def dashboard_finanzas():
     }
     cmp_json = json.dumps(cmp_payload, ensure_ascii=False)
 
-    head_rows = cmp_rows[:3]
-    tail_rows = cmp_rows[3:]
+    def _row_has_data(r):
+        return (
+            abs(float(r["calc"] or 0.0)) > 0
+            or r["cash"] is not None
+            or r["digital"] is not None
+            or r["apps"] is not None
+        )
+
+    rows_with_data = [r for r in cmp_rows if _row_has_data(r)]
+    rows_without_data = [r for r in cmp_rows if not _row_has_data(r)]
+
+    head_rows = rows_with_data[-5:]
+    tail_rows = rows_with_data[:-5] + rows_without_data
 
     def _cmp_tr(r):
         form_id = f"rp_{r['date_iso']}"
         total_html = _total_html(r["calc"], r["real_total"])
+        explained_html = _explained_html(r["calc"], r["explained_total"])
+        desfasaje_html = _desfasaje_html(r["calc"], r["explained_total"])
         return (
             "<tr>"
             f"<td>{r['date_ar']}</td>"
@@ -299,15 +340,19 @@ def dashboard_finanzas():
             f"<td>"
             f"<input form='{form_id}' name='real_digital_profit' placeholder='Digital' value='{_money_input(r['digital'])}' />"
             f"</td>"
+            f"<td>"
+            f"<input form='{form_id}' name='real_apps_pending' placeholder='Apps' value='{_money_input(r['apps'])}' />"
+            f"</td>"
             f"<td class='num'>"
             f"<button form='{form_id}' class='btn' type='submit' style='min-width:120px;'>Guardar</button>"
             f"</td>"
             f"<td class='num totalCell'>{total_html}</td>"
+            f"<td class='num explainedCell'>{explained_html}</td>"
+            f"<td class='num desfasajeCell'>{desfasaje_html}</td>"
             "</tr>"
         )
 
-
-    head_html = "".join(_cmp_tr(r) for r in head_rows) if head_rows else "<tr><td colspan='6' class='muted'>Sin datos</td></tr>"
+    head_html = "".join(_cmp_tr(r) for r in head_rows) if head_rows else "<tr><td colspan='9' class='muted'>Sin datos</td></tr>"
     tail_html = "".join(_cmp_tr(r) for r in tail_rows)
 
     details_html = ""
@@ -323,8 +368,11 @@ def dashboard_finanzas():
                 <th class="num">Ganancia calculada</th>
                 <th style="text-align:center;">Ganancia Efectivo</th>
                 <th style="text-align:center;">Ganancia Digital</th>
+                <th style="text-align:center;">Apps pendientes</th>
                 <th style="text-align:center;"></th>
                 <th class="num">Ganancia Real Total</th>
+                <th class="num">Real + Apps</th>
+                <th class="num">Desfasaje final</th>
               </tr>
             </thead>
             <tbody>{tail_html}</tbody>
@@ -336,6 +384,7 @@ def dashboard_finanzas():
     <h1>Panel Central</h1>
 
     <div class="card">
+      <h3>Bloque 0 · Filtro del período</h3>
       <form method="get" action="/finanzas">
         <div class="row-actions">
           <div class="field">
@@ -423,21 +472,21 @@ def dashboard_finanzas():
         <div class="muted">Gasto fijo en el rango</div>
       </div>
 
-      <div class="card kpi">
-        <div class="label">Sueldo Ximena restante</div>
-        <div class="value">{ars(sueldo_restante)}</div>
-        <div class="muted">{ars(SUELDO_XIMENA_META)} − Sueldo Ximena</div>
+      <div class="card kpi profit">
+        <div class="label">Ganancia Real Final</div>
+        <div class="value">{ars(real_fina_accum)}</div>
+        <div class="muted">Efectivo + digital + apps pendientes</div>
       </div>
     </div>
 
     <div class="grid">
       <div class="card">
-        <h3>Torta del período</h3>
+        <h3>Bloque 1 · Torta del período</h3>
         <div class="chartbox"><canvas id="pieChart"></canvas></div>
         <p class="muted" style="margin-top:10px;">(Domingos excluidos del cálculo)</p>
       </div>
       <div class="card">
-        <h3>Top 3 mejores días (ganancia)</h3>
+        <h3>Bloque 2 · Top 3 mejores días (ganancia)</h3>
         <table>
           <thead><tr><th>Fecha</th><th class="num">Ingresos</th><th class="num">Ganancia</th></tr></thead>
           <tbody>{best_html}</tbody>
@@ -447,23 +496,23 @@ def dashboard_finanzas():
 
     <div class="grid">
       <div class="card">
-        <h3>Top 3 peores días (ganancia)</h3>
+        <h3>Bloque 3 · Top 3 peores días (ganancia)</h3>
         <table>
           <thead><tr><th>Fecha</th><th class="num">Ingresos</th><th class="num">Ganancia</th></tr></thead>
           <tbody>{worst_html}</tbody>
         </table>
       </div>
       <div class="card">
-        <h3>Alertas (Gastos &gt; {ars(500000)})</h3>
+        <h3>Bloque 4 · Alertas (Gastos &gt; {ars(500000)})</h3>
         {alerts_html}
       </div>
     </div>
 
     <div class="card" id="profit-control">
-      <h3>Control de Ganancia Calculada vs Real (DIARIO)</h3>
+      <h3>Bloque 5 · Control de Ganancia Calculada vs Real (últimos 5 días visibles)</h3>
       <div class="chartbox"><canvas id="profitCompareChart"></canvas></div>
       <p class="muted" style="margin-top:10px;">
-        Total real = Efectivo + Digital. Semáforo: verde hasta ±30.000, amarillo hasta ±60.000, rojo si supera ±60.000 respecto de la calculada.
+        Total real = Efectivo + Digital. “Apps pendientes” no suma a caja real: solo explica parte del desfase contra la calculada. El semáforo usa verde hasta ±30.000, amarillo hasta ±60.000 y rojo si supera ±60.000.
       </p>
 
       <div style="height:10px;"></div>
@@ -475,8 +524,11 @@ def dashboard_finanzas():
             <th class="num">Ganancia calculada</th>
             <th style="text-align:center;">Ganancia Efectivo</th>
             <th style="text-align:center;">Ganancia Digital</th>
+            <th style="text-align:center;">Apps pendientes</th>
             <th style="text-align:center;"></th>
             <th class="num">Ganancia Real Total</th>
+            <th class="num">Real + Apps</th>
+            <th class="num">Desfasaje final</th>
           </tr>
         </thead>
         <tbody>{head_html}</tbody>
@@ -509,16 +561,6 @@ def dashboard_finanzas():
         const n = Math.round(Number(v||0));
         const s = n.toString().replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ".");
         return "$ " + s;
-      }}
-
-      function totalHtml(calc, total){{
-        if(total === null || total === undefined || Number.isNaN(total)) return "<span class='muted'>—</span>";
-        const delta = total - calc;
-        const ad = Math.abs(delta);
-        let cls = "bad";
-        if(ad <= 30000) cls = "ok";
-        else if(ad <= 60000) cls = "warn";
-        return `<span class="pill ${{cls}}">${{fmtMoney(total)}}</span>`;
       }}
 
       const pieValuePlugin = {{
@@ -691,6 +733,12 @@ def dashboard_finanzas():
         if(tr) {{
           const totalCell = tr.querySelector('.totalCell');
           if(totalCell) totalCell.innerHTML = data.total_html;
+
+          const explainedCell = tr.querySelector('.explainedCell');
+          if(explainedCell) explainedCell.innerHTML = data.explained_html;
+
+          const desfasajeCell = tr.querySelector('.desfasajeCell');
+          if(desfasajeCell) desfasajeCell.innerHTML = data.desfasaje_html;
         }}
 
         const idx = profitCmp.dates.indexOf(data.day);
@@ -725,6 +773,7 @@ def save_real_profit_json():
     day = (request.form.get("day") or "").strip()
     v_cash = (request.form.get("real_cash_profit") or "").strip()
     v_digital = (request.form.get("real_digital_profit") or "").strip()
+    v_apps = (request.form.get("real_apps_pending") or "").strip()
 
     if not day:
         return jsonify({"ok": False, "error": "Falta fecha"}), 400
@@ -737,6 +786,7 @@ def save_real_profit_json():
 
     cash = None if v_cash == "" else safe_float(v_cash)
     digital = None if v_digital == "" else safe_float(v_digital)
+    apps = None if v_apps == "" else safe_float(v_apps)
 
     bday = BusinessDay.query.filter_by(day=d).first()
     if not bday:
@@ -748,6 +798,7 @@ def save_real_profit_json():
 
     bday.real_cash_profit = cash
     bday.real_digital_profit = digital
+    bday.real_apps_pending = apps
 
     total = None
     if cash is not None or digital is not None:
@@ -764,9 +815,22 @@ def save_real_profit_json():
     calc = float(t["profit"])
     total_html = _total_html(calc, total)
 
+    explained_total = None
+    explained_html = "<span class='muted'>—</span>"
+    desfasaje_html = "<span class='muted'>—</span>"
+
+    if total is not None or apps is not None:
+        explained_total = float(total or 0.0) + float(apps or 0.0)
+        explained_html = _explained_html(calc, explained_total)
+        desfasaje_html = _desfasaje_html(calc, explained_total)
+
     return jsonify({
         "ok": True,
         "day": day,
         "real_total_value": total,
+        "apps_value": apps,
+        "explained_total_value": explained_total,
         "total_html": total_html,
+        "explained_html": explained_html,
+        "desfasaje_html": desfasaje_html,
     })

@@ -16,6 +16,10 @@ def _owners():
     return render_page, ensure_shifts, recalc_day_status, day_totals, margin_bucket
 
 
+def _money_input(v):
+    return "" if v is None else str(float(v))
+
+
 @days_bp.get("/days/go")
 @login_required
 def days_go():
@@ -62,7 +66,9 @@ def list_days():
 
     body = f"""
     <h1>Días</h1>
+
     <div class="card">
+      <h3>Listado de días cargados</h3>
       <table>
         <thead>
           <tr>
@@ -138,7 +144,6 @@ def edit_day(day):
 
     shifts = {s.shift: s for s in bday.shifts}
     totals = day_totals(bday)
-    real_default = totals["profit"] if bday.real_profit is None else bday.real_profit
 
     def v(sh, field):
         s = shifts.get(sh)
@@ -152,17 +157,27 @@ def edit_day(day):
         s = shifts.get(sh)
         return "checked" if (s and bool(getattr(s, "is_closed", False))) else ""
 
+    real_cash = getattr(bday, "real_cash_profit", None)
+    real_digital = getattr(bday, "real_digital_profit", None)
+    real_apps = getattr(bday, "real_apps_pending", None)
+
+    if real_cash is None and getattr(bday, "real_profit", None) is not None:
+        real_cash = float(bday.real_profit)
+    if real_digital is None:
+        real_digital = 0.0 if getattr(bday, "real_profit", None) is not None else None
+
     body = f"""
     <h1>Editar día {fmt_date_ar(bday.day)}</h1>
 
     <div class="card">
+      <h3>Bloque 1 · Datos generales del día</h3>
       <form method="post" action="/days/{bday.day}/save">
         <label>Nota del día</label>
         <textarea name="note">{bday.note or ""}</textarea>
 
         <div class="grid" style="margin-top:12px;">
           <div class="card">
-            <h3>Mañana</h3>
+            <h3>Turno Mañana</h3>
             <label><input type="checkbox" name="Mañana_closed" {c("Mañana")}> Turno cerrado</label>
             <div style="height:10px;"></div>
 
@@ -175,7 +190,7 @@ def edit_day(day):
           </div>
 
           <div class="card">
-            <h3>Tarde</h3>
+            <h3>Turno Tarde</h3>
             <label><input type="checkbox" name="Tarde_closed" {c("Tarde")}> Turno cerrado</label>
             <div style="height:10px;"></div>
 
@@ -188,15 +203,28 @@ def edit_day(day):
           </div>
         </div>
 
-        <div style="height:12px;"></div>
-
         <div class="card" style="margin:12px 0 0;">
-          <h3>Ganancia real (manual)</h3>
+          <h3>Bloque 2 · Ganancia real y desfase explicado</h3>
           <p class="muted" style="margin-top:0;">
-            Por defecto se propone la ganancia calculada ({ars(totals["profit"])}). Podés ajustarla.
+            La ganancia real representa lo efectivamente cobrado. “Apps pendientes” sirve para explicar parte del desfase contra la calculada, sin sumarlo a caja real.
           </p>
-          <label>Ganancia real</label>
-          <input name="real_profit" value="{real_default}" />
+
+          <div class="grid3">
+            <div>
+              <label>Ganancia en efectivo</label>
+              <input name="real_cash_profit" value="{_money_input(real_cash)}" placeholder="Ej: 250000" />
+            </div>
+
+            <div>
+              <label>Ganancia digital</label>
+              <input name="real_digital_profit" value="{_money_input(real_digital)}" placeholder="Ej: 180000" />
+            </div>
+
+            <div>
+              <label>Apps pendientes (PY + Rappi)</label>
+              <input name="real_apps_pending" value="{_money_input(real_apps)}" placeholder="Ej: 95000" />
+            </div>
+          </div>
         </div>
 
         <div style="height:12px;"></div>
@@ -206,7 +234,10 @@ def edit_day(day):
 
     <div class="grid">
       <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;"><h3 style="margin:0;">Gastos Variables</h3><a class="btn" href="/categories/manage?kind=variable&day={bday.day}">Editar categorías</a></div>
+        <h3>Bloque 3 · Gastos variables</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+          <a class="btn" href="/categories/manage?kind=variable&day={bday.day}">Administrar / editar categorías</a>
+        </div>
 
         <form method="post" action="/categories/add" class="inline" style="margin-bottom:10px;">
           <input type="hidden" name="day" value="{bday.day}" />
@@ -251,7 +282,10 @@ def edit_day(day):
       </div>
 
       <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;"><h3 style="margin:0;">Gastos Fijos</h3><a class="btn" href="/categories/manage?kind=fixed&day={bday.day}">Editar categorías</a></div>
+        <h3>Bloque 4 · Gastos fijos</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+          <a class="btn" href="/categories/manage?kind=fixed&day={bday.day}">Administrar / editar categorías</a>
+        </div>
 
         <form method="post" action="/categories/add" class="inline" style="margin-bottom:10px;">
           <input type="hidden" name="day" value="{bday.day}" />
@@ -297,7 +331,7 @@ def edit_day(day):
     </div>
 
     <div class="card">
-      <h3>Totales del día</h3>
+      <h3>Bloque 5 · Totales del día</h3>
       <div class="grid4">
         <div class="kpi income" style="padding:14px;">
           <div class="label">Ingresos</div>
@@ -350,12 +384,19 @@ def save_day(day):
         sr.note = (request.form.get(f"{sh}_note") or "").strip()
         sr.is_closed = True if request.form.get(f"{sh}_closed") == "on" else False
 
-    rp_raw = (request.form.get("real_profit") or "").strip()
-    if rp_raw == "":
+    cash_raw = (request.form.get("real_cash_profit") or "").strip()
+    digital_raw = (request.form.get("real_digital_profit") or "").strip()
+    apps_raw = (request.form.get("real_apps_pending") or "").strip()
+
+    bday.real_cash_profit = None if cash_raw == "" else safe_float(cash_raw)
+    bday.real_digital_profit = None if digital_raw == "" else safe_float(digital_raw)
+    bday.real_apps_pending = None if apps_raw == "" else safe_float(apps_raw)
+
+    if bday.real_cash_profit is not None or bday.real_digital_profit is not None:
+        bday.real_profit = float(bday.real_cash_profit or 0.0) + float(bday.real_digital_profit or 0.0)
+    else:
         t = day_totals(bday)
         bday.real_profit = float(t["profit"])
-    else:
-        bday.real_profit = safe_float(rp_raw)
 
     recalc_day_status(bday)
     db.session.commit()
@@ -421,9 +462,17 @@ def manage_categories():
         used = int(counts.get(c.id, 0))
         disabled = "disabled" if used > 0 else ""
         disabled_class = "disabled" if used > 0 else ""
+
+        merge_options = "".join(
+            f"<option value='{other.id}'>{other.name}</option>"
+            for other in cats
+            if other.id != c.id
+        )
+        merge_disabled = "disabled" if not merge_options else ""
+
         rows += f"""
         <tr>
-          <td style="width:40%;">
+          <td style="vertical-align:top; width:34%;">
             <form method="post" action="/categories/{c.id}/rename" class="inline" style="margin:0;">
               <input type="hidden" name="kind" value="{kind}" />
               <input type="hidden" name="day" value="{day}" />
@@ -431,12 +480,30 @@ def manage_categories():
                 <input name="name" value="{c.name}" />
               </div>
               <div style="min-width:140px;">
-                <button class="btn" type="submit" style="width:100%;">Guardar</button>
+                <button class="btn" type="submit" style="width:100%;">Guardar nombre</button>
               </div>
             </form>
           </td>
-          <td class="num" style="width:10%;">{used}</td>
-          <td class="num" style="width:20%;">
+
+          <td class="num" style="vertical-align:top; width:8%;">{used}</td>
+
+          <td style="vertical-align:top; width:38%;">
+            <form method="post" action="/categories/{c.id}/merge" class="inline" style="margin:0;">
+              <input type="hidden" name="kind" value="{kind}" />
+              <input type="hidden" name="day" value="{day}" />
+              <div class="field" style="min-width:220px;">
+                <select name="target_id" {merge_disabled}>
+                  <option value="" disabled selected>Fusionar en...</option>
+                  {merge_options}
+                </select>
+              </div>
+              <div style="min-width:150px;">
+                <button class="btn" type="submit" style="width:100%;" {merge_disabled}>Fusionar</button>
+              </div>
+            </form>
+          </td>
+
+          <td class="num" style="vertical-align:top; width:20%;">
             <form method="post" action="/categories/{c.id}/delete" style="margin:0;">
               <input type="hidden" name="kind" value="{kind}" />
               <input type="hidden" name="day" value="{day}" />
@@ -447,13 +514,16 @@ def manage_categories():
         """
 
     if not rows:
-        rows = "<tr><td colspan='3' class='muted'>No hay categorías cargadas.</td></tr>"
+        rows = "<tr><td colspan='4' class='muted'>No hay categorías cargadas.</td></tr>"
 
     back_url = url_for("days_bp.edit_day", day=day) if day else url_for("dashboard_bp.dashboard_finanzas")
 
     body = f"""
     <h1>Categorías {kind_label}</h1>
-    <p class="muted">Podés renombrar. Borrar solo si no tiene gastos asociados (Uso = 0).</p>
+    <p class="muted">
+      Podés renombrar, fusionar y borrar. Borrar solo si no tiene gastos asociados (Uso = 0).
+      Si una categoría está mal escrita y ya tiene movimientos, usá <b>Fusionar</b>.
+    </p>
 
     <div class="card">
       <a class="btn" href="{back_url}">Volver</a>
@@ -461,7 +531,14 @@ def manage_categories():
 
     <div class="card">
       <table>
-        <thead><tr><th>Nombre</th><th class="num">Uso</th><th class="num">Acción</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th class="num">Uso</th>
+            <th>Fusionar en</th>
+            <th class="num">Acción</th>
+          </tr>
+        </thead>
         <tbody>{rows}</tbody>
       </table>
     </div>
@@ -488,13 +565,60 @@ def rename_category(cid):
 
     exists = ExpenseCategory.query.filter_by(kind=c.kind, name=clean).first()
     if exists and exists.id != c.id:
-        flash("Ya existe una categoría con ese nombre.", "error")
+        flash("Ya existe una categoría con ese nombre. Usá Fusionar para unificarlas.", "error")
         return redirect(url_for("days_bp.manage_categories", kind=c.kind, day=day))
 
     c.name = clean
     db.session.commit()
     flash("Categoría actualizada.", "ok")
     return redirect(url_for("days_bp.manage_categories", kind=c.kind, day=day))
+
+
+@days_bp.post("/categories/<int:cid>/merge")
+@login_required
+def merge_category(cid):
+    kind = (request.form.get("kind") or "").strip().lower()
+    day = (request.form.get("day") or "").strip()
+    target_id_raw = (request.form.get("target_id") or "").strip()
+
+    src = db.session.get(ExpenseCategory, cid)
+    if not src:
+        flash("Categoría origen no encontrada.", "error")
+        return redirect(url_for("days_bp.manage_categories", kind=kind, day=day))
+
+    if not target_id_raw:
+        flash("Elegí la categoría destino para fusionar.", "error")
+        return redirect(url_for("days_bp.manage_categories", kind=src.kind, day=day))
+
+    try:
+        target_id = int(target_id_raw)
+    except ValueError:
+        flash("Destino inválido.", "error")
+        return redirect(url_for("days_bp.manage_categories", kind=src.kind, day=day))
+
+    if target_id == src.id:
+        flash("No podés fusionar una categoría consigo misma.", "error")
+        return redirect(url_for("days_bp.manage_categories", kind=src.kind, day=day))
+
+    target = db.session.get(ExpenseCategory, target_id)
+    if not target:
+        flash("Categoría destino no encontrada.", "error")
+        return redirect(url_for("days_bp.manage_categories", kind=src.kind, day=day))
+
+    if src.kind != target.kind:
+        flash("Solo se pueden fusionar categorías del mismo tipo.", "error")
+        return redirect(url_for("days_bp.manage_categories", kind=src.kind, day=day))
+
+    db.session.query(ExpenseEntry).filter(ExpenseEntry.category_id == src.id).update(
+        {ExpenseEntry.category_id: target.id},
+        synchronize_session=False,
+    )
+
+    db.session.delete(src)
+    db.session.commit()
+
+    flash(f"Categoría fusionada en '{target.name}'.", "ok")
+    return redirect(url_for("days_bp.manage_categories", kind=target.kind, day=day))
 
 
 @days_bp.post("/categories/<int:cid>/delete")
@@ -510,7 +634,7 @@ def delete_category(cid):
 
     used = db.session.query(func.count(ExpenseEntry.id)).filter(ExpenseEntry.category_id == c.id).scalar() or 0
     if used > 0:
-        flash("No se puede borrar: la categoría tiene gastos asociados.", "error")
+        flash("No se puede borrar: la categoría tiene gastos asociados. Usá Fusionar si querés unificarla con otra.", "error")
         return redirect(url_for("days_bp.manage_categories", kind=c.kind, day=day))
 
     db.session.delete(c)

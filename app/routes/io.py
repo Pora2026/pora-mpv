@@ -12,6 +12,8 @@ from app.utils.dates import parse_ymd, iso, fmt_date_ar, month_range
 
 io_bp = Blueprint("io_bp", __name__)
 
+TOP_GASTOS_KEY = "__TOP_GASTOS__"
+
 
 def _owners():
     from app_owners import render_page, range_series, period_previous
@@ -43,6 +45,22 @@ def io_dashboard():
     compare_mode = (request.args.get("compare_mode") or "prev").strip()
     c1s = (request.args.get("cfrom") or "").strip()
     c2s = (request.args.get("cto") or "").strip()
+
+    selected_raw = request.args.getlist("cats")
+    selected_top = TOP_GASTOS_KEY in selected_raw
+
+    selected_ids = []
+    for x in selected_raw:
+        if x == TOP_GASTOS_KEY:
+            continue
+        try:
+            selected_ids.append(int(x))
+        except Exception:
+            pass
+
+    selected_ids_set = {str(x) for x in selected_ids}
+    if selected_top:
+        selected_ids_set.add(TOP_GASTOS_KEY)
 
     if d1s and d2s:
         try:
@@ -103,6 +121,7 @@ def io_dashboard():
 
     cat_rows = (
         db.session.query(
+            ExpenseCategory.id.label("category_id"),
             ExpenseCategory.kind,
             ExpenseCategory.name,
             func.coalesce(func.sum(ExpenseEntry.amount), 0.0).label("total"),
@@ -110,8 +129,8 @@ def io_dashboard():
         .join(ExpenseEntry, ExpenseEntry.category_id == ExpenseCategory.id)
         .join(BusinessDay, BusinessDay.id == ExpenseEntry.business_day_id)
         .filter(BusinessDay.day >= d1, BusinessDay.day <= d2)
-        .group_by(ExpenseCategory.kind, ExpenseCategory.name)
-        .order_by(func.sum(ExpenseEntry.amount).desc())
+        .group_by(ExpenseCategory.id, ExpenseCategory.kind, ExpenseCategory.name)
+        .order_by(func.sum(ExpenseEntry.amount).desc(), ExpenseCategory.name.asc())
         .all()
     )
 
@@ -147,21 +166,29 @@ def io_dashboard():
             </details>
             """.format(rest_html=rest_html)
 
-    top_cats = [(r.kind, r.name) for r in cat_rows[:6]]
-    top_cat_objs = []
-    for kind, name in top_cats:
-        c = ExpenseCategory.query.filter_by(kind=kind, name=name).first()
-        if c:
-            top_cat_objs.append(c)
+    all_categories = ExpenseCategory.query.order_by(ExpenseCategory.name.asc()).all()
 
-    top_cat_ids = [c.id for c in top_cat_objs]
-    top_cat_names = {c.id: c.name for c in top_cat_objs}
+    use_top_gastos = selected_top or not selected_ids
+
+    if use_top_gastos:
+        top_cat_ids = [r.category_id for r in cat_rows[:6]]
+    else:
+        top_cat_ids = selected_ids
+
+    selected_cat_objs = []
+    if top_cat_ids:
+        selected_cat_objs = (
+            ExpenseCategory.query
+            .filter(ExpenseCategory.id.in_(top_cat_ids))
+            .order_by(ExpenseCategory.name.asc())
+            .all()
+        )
+
+    top_cat_names = {c.id: c.name for c in selected_cat_objs}
 
     dialect = db.engine.dialect.name
     ym_expr = func.to_char(BusinessDay.day, "YYYY-MM") if dialect == "postgresql" else func.strftime("%Y-%m", BusinessDay.day)
 
-    # Trazabilidad mensual global: desde el primer mes con datos hasta el último,
-    # independiente del filtro actual.
     rows_tr_all = []
     if top_cat_ids:
         rows_tr_all = (
@@ -180,9 +207,8 @@ def io_dashboard():
     trace_all = {}
     for r in rows_tr_all:
         trace_all.setdefault(r.ym, {})
-        trace_all[r.ym][top_cat_names.get(r.category_id, str(r.category_id))] = float(r.total or 0.0)
+        trace_all[r.ym][r.category_id] = float(r.total or 0.0)
 
-    # Hardcode: trazabilidad siempre desde 2026-01 hasta el mes actual
     start_year = 2026
     start_month = 1
     end_year = today.year
@@ -199,12 +225,11 @@ def io_dashboard():
             m += 1
 
     trace_datasets = []
-    for cid in top_cat_ids:
-        name = top_cat_names[cid]
+    for c in selected_cat_objs:
         data = []
         for month_key in trace_months:
-            data.append(trace_all.get(month_key, {}).get(name, 0.0))
-        trace_datasets.append({"label": name, "data": data})
+            data.append(trace_all.get(month_key, {}).get(c.id, 0.0))
+        trace_datasets.append({"label": c.name, "data": data})
 
     if compare_mode == "custom" and c1s and c2s:
         try:
@@ -272,6 +297,14 @@ def io_dashboard():
 
     trace_payload = {"labels": trace_months, "datasets": trace_datasets}
     trace_json = json.dumps(trace_payload, ensure_ascii=False)
+
+    cats_options_html = (
+        f"<option value='{TOP_GASTOS_KEY}' {'selected' if use_top_gastos else ''}>Top Gastos</option>"
+        + "".join(
+            f"<option value='{c.id}' {'selected' if (not use_top_gastos and str(c.id) in selected_ids_set) else ''}>{c.name}</option>"
+            for c in all_categories
+        )
+    )
 
     body = f"""
     <h1>Gestión de Ingresos y Gastos</h1>
@@ -350,7 +383,33 @@ def io_dashboard():
     </div>
 
     <div class="card">
-      <h3>Trazabilidad mensual (Top categorías)</h3>
+      <h3>Trazabilidad mensual</h3>
+
+      <form method="get" action="/io" style="margin-bottom:12px;">
+        <input type="hidden" name="from" value="{d1s}" />
+        <input type="hidden" name="to" value="{d2s}" />
+        <input type="hidden" name="compare_mode" value="{compare_mode}" />
+        <input type="hidden" name="cfrom" value="{c1s}" />
+        <input type="hidden" name="cto" value="{c2s}" />
+
+        <div class="row-actions">
+          <div class="field" style="min-width:280px;">
+            <label>Categorías a visualizar</label>
+            <select name="cats" multiple style="min-width:280px; height:130px;">
+              {cats_options_html}
+            </select>
+            <div class="muted" style="margin-top:6px;">
+              “Top Gastos” toma automáticamente las 6 categorías con mayor gasto del rango actual. Si no seleccionás nada, también se usa ese criterio.
+            </div>
+          </div>
+
+          <div style="min-width:160px;">
+            <label>&nbsp;</label>
+            <button class="btn" type="submit" style="width:100%;">Aplicar categorías</button>
+          </div>
+        </div>
+      </form>
+
       <div class="chartbox"><canvas id="traceChart"></canvas></div>
     </div>
 
