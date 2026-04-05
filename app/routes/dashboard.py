@@ -245,12 +245,15 @@ def dashboard_finanzas():
     real_fina_accum = 0.0
     calc_accum_running = 0.0
     real_accum_running = 0.0
+    explained_accum_running = 0.0
     cmp_dates = []
     cmp_labels = []
     cmp_calc = []
     cmp_real = []
+    cmp_explained = []
     cmp_calc_accum = []
     cmp_real_accum = []
+    cmp_explained_accum = []
 
     for d in all_days:
         b = bmap.get(d)
@@ -292,19 +295,28 @@ def dashboard_finanzas():
         cmp_labels.append(fmt_date_ar(d))
         cmp_calc.append(round(calc, 2))
         cmp_real.append(None if total is None else round(float(total), 2))
+        cmp_explained.append(None if explained_total is None else round(float(explained_total), 2))
+
         calc_accum_running += float(calc)
         cmp_calc_accum.append(round(calc_accum_running, 2))
+
         if total is not None:
             real_accum_running += float(total)
         cmp_real_accum.append(round(real_accum_running, 2))
+
+        if explained_total is not None:
+            explained_accum_running += float(explained_total)
+        cmp_explained_accum.append(round(explained_accum_running, 2))
 
     cmp_payload = {
         "dates": cmp_dates,
         "labels": cmp_labels,
         "calc": cmp_calc,
         "real": cmp_real,
+        "explained": cmp_explained,
         "calc_accum": cmp_calc_accum,
         "real_accum": cmp_real_accum,
+        "explained_accum": cmp_explained_accum,
     }
     cmp_json = json.dumps(cmp_payload, ensure_ascii=False)
 
@@ -512,7 +524,7 @@ def dashboard_finanzas():
       <h3>Bloque 5 · Control de Ganancia Calculada vs Real (últimos 5 días visibles)</h3>
       <div class="chartbox"><canvas id="profitCompareChart"></canvas></div>
       <p class="muted" style="margin-top:10px;">
-        Total real = Efectivo + Digital. “Apps pendientes” no suma a caja real: solo explica parte del desfase contra la calculada. El semáforo usa verde hasta ±30.000, amarillo hasta ±60.000 y rojo si supera ±60.000.
+        Azul = calculada. Rojo = real (efectivo + digital). Verde = real + apps. Las líneas acumuladas mantienen el mismo color y se muestran interlineadas.
       </p>
 
       <div style="height:10px;"></div>
@@ -558,7 +570,7 @@ def dashboard_finanzas():
       }};
 
       function fmtMoney(v){{
-        const n = Math.round(Number(v||0));
+        const n = Math.round(Number(v || 0));
         const s = n.toString().replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ".");
         return "$ " + s;
       }}
@@ -641,6 +653,7 @@ def dashboard_finanzas():
                 fill: false,
                 borderWidth: 2,
                 pointRadius: 3,
+                spanGaps: false,
                 borderColor: '#2563eb',
                 backgroundColor: '#2563eb',
                 pointBackgroundColor: '#2563eb'
@@ -658,16 +671,29 @@ def dashboard_finanzas():
                 pointBackgroundColor: '#dc2626'
               }},
               {{
+                label: 'Ganancia Real + Apps',
+                data: profitCmp.explained,
+                tension: 0.25,
+                fill: false,
+                borderWidth: 2,
+                pointRadius: 3,
+                spanGaps: false,
+                borderColor: '#16a34a',
+                backgroundColor: '#16a34a',
+                pointBackgroundColor: '#16a34a'
+              }},
+              {{
                 label: 'Calculada Acumulada',
                 data: profitCmp.calc_accum,
                 tension: 0.2,
                 fill: false,
                 borderWidth: 2,
                 pointRadius: 2,
-                borderDash: [6,4],
-                borderColor: '#60a5fa',
-                backgroundColor: '#60a5fa',
-                pointBackgroundColor: '#60a5fa'
+                borderDash: [6, 4],
+                spanGaps: false,
+                borderColor: '#2563eb',
+                backgroundColor: '#2563eb',
+                pointBackgroundColor: '#2563eb'
               }},
               {{
                 label: 'Real Acumulada',
@@ -676,11 +702,24 @@ def dashboard_finanzas():
                 fill: false,
                 borderWidth: 2,
                 pointRadius: 2,
-                borderDash: [6,4],
+                borderDash: [6, 4],
                 spanGaps: false,
-                borderColor: '#fb923c',
-                backgroundColor: '#fb923c',
-                pointBackgroundColor: '#fb923c'
+                borderColor: '#dc2626',
+                backgroundColor: '#dc2626',
+                pointBackgroundColor: '#dc2626'
+              }},
+              {{
+                label: 'Real + Apps Acumulada',
+                data: profitCmp.explained_accum,
+                tension: 0.2,
+                fill: false,
+                borderWidth: 2,
+                pointRadius: 2,
+                borderDash: [6, 4],
+                spanGaps: false,
+                borderColor: '#16a34a',
+                backgroundColor: '#16a34a',
+                pointBackgroundColor: '#16a34a'
               }}
             ]
           }},
@@ -709,10 +748,10 @@ def dashboard_finanzas():
         }});
       }}
 
-      function recomputeRealAccum(arr){{
+      function recomputeAccum(arr){{
         let run = 0;
         return arr.map(v => {{
-          if(v !== null && v !== undefined && !Number.isNaN(v)) run += Number(v);
+          if (v !== null && v !== undefined && !Number.isNaN(v)) run += Number(v);
           return run;
         }});
       }}
@@ -724,37 +763,43 @@ def dashboard_finanzas():
           body: fd
         }});
         const data = await res.json();
-        if(!data.ok) {{
+        if (!data.ok) {{
           alert(data.error || "Error guardando ganancia real");
           return;
         }}
 
         const tr = form.closest('tr');
-        if(tr) {{
+        if (tr) {{
           const totalCell = tr.querySelector('.totalCell');
-          if(totalCell) totalCell.innerHTML = data.total_html;
+          if (totalCell) totalCell.innerHTML = data.total_html;
 
           const explainedCell = tr.querySelector('.explainedCell');
-          if(explainedCell) explainedCell.innerHTML = data.explained_html;
+          if (explainedCell) explainedCell.innerHTML = data.explained_html;
 
           const desfasajeCell = tr.querySelector('.desfasajeCell');
-          if(desfasajeCell) desfasajeCell.innerHTML = data.desfasaje_html;
+          if (desfasajeCell) desfasajeCell.innerHTML = data.desfasaje_html;
         }}
 
         const idx = profitCmp.dates.indexOf(data.day);
-        if(idx >= 0) {{
+        if (idx >= 0) {{
           profitCmp.real[idx] = data.real_total_value;
-          profitCmp.real_accum = recomputeRealAccum(profitCmp.real);
-          if(profitCompareChartInstance) {{
+          profitCmp.explained[idx] = data.explained_total_value;
+
+          profitCmp.real_accum = recomputeAccum(profitCmp.real);
+          profitCmp.explained_accum = recomputeAccum(profitCmp.explained);
+
+          if (profitCompareChartInstance) {{
             profitCompareChartInstance.data.datasets[1].data = profitCmp.real;
-            profitCompareChartInstance.data.datasets[3].data = profitCmp.real_accum;
+            profitCompareChartInstance.data.datasets[2].data = profitCmp.explained;
+            profitCompareChartInstance.data.datasets[4].data = profitCmp.real_accum;
+            profitCompareChartInstance.data.datasets[5].data = profitCmp.explained_accum;
             profitCompareChartInstance.update();
           }}
         }}
       }}
 
       document.querySelectorAll('.realProfitForm').forEach((form) => {{
-        form.addEventListener('submit', function(ev){{
+        form.addEventListener('submit', function(ev) {{
           ev.preventDefault();
           postRealProfit(form);
         }});
