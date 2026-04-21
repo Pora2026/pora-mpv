@@ -224,6 +224,11 @@ def edit_day(day):
               <label>Apps pendientes (PY + Rappi)</label>
               <input name="real_apps_pending" value="{_money_input(real_apps)}" placeholder="Ej: 95000" />
             </div>
+            
+            <div>
+              <label>Apps cobradas</label>
+              <input name="real_apps_collected" value="{_money_input(getattr(bday, 'real_apps_collected', None))}" placeholder="Ej: 120000" />
+            </div>
           </div>
         </div>
 
@@ -387,13 +392,23 @@ def save_day(day):
     cash_raw = (request.form.get("real_cash_profit") or "").strip()
     digital_raw = (request.form.get("real_digital_profit") or "").strip()
     apps_raw = (request.form.get("real_apps_pending") or "").strip()
+    apps_collected_raw = (request.form.get("real_apps_collected") or "").strip()
+    bday.real_apps_collected = None if apps_collected_raw == "" else safe_float(apps_collected_raw)
 
     bday.real_cash_profit = None if cash_raw == "" else safe_float(cash_raw)
     bday.real_digital_profit = None if digital_raw == "" else safe_float(digital_raw)
     bday.real_apps_pending = None if apps_raw == "" else safe_float(apps_raw)
 
-    if bday.real_cash_profit is not None or bday.real_digital_profit is not None:
-        bday.real_profit = float(bday.real_cash_profit or 0.0) + float(bday.real_digital_profit or 0.0)
+    if (
+        bday.real_cash_profit is not None
+        or bday.real_digital_profit is not None
+        or bday.real_apps_collected is not None
+    ):
+        bday.real_profit = (
+            float(bday.real_cash_profit or 0.0)
+            + float(bday.real_digital_profit or 0.0)
+            + float(bday.real_apps_collected or 0.0)
+        )
     else:
         t = day_totals(bday)
         bday.real_profit = float(t["profit"])

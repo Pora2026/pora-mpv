@@ -52,6 +52,6 @@ def ars(v) -> str:
     except:
         n = 0.0
 
-    s = f"{n:,.2f}"
+    s = f"{n:,.0f}"
     s = s.replace(",", "X").replace(".", ",").replace("X", ".")
     return f"$ {s}"

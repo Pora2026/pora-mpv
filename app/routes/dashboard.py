@@ -39,6 +39,7 @@ def _real_parts(bday):
     cash = getattr(bday, "real_cash_profit", None)
     digital = getattr(bday, "real_digital_profit", None)
     apps = getattr(bday, "real_apps_pending", None)
+    apps_collected = getattr(bday, "real_apps_collected", None)
     legacy = getattr(bday, "real_profit", None)
 
     if cash is None and digital is None and legacy is not None:
@@ -46,14 +47,14 @@ def _real_parts(bday):
         digital = 0.0
 
     total = None
-    if cash is not None or digital is not None:
-        total = float(cash or 0.0) + float(digital or 0.0)
+    if cash is not None or digital is not None or apps_collected is not None:
+        total = float(cash or 0.0) + float(digital or 0.0) + float(apps_collected or 0.0)
 
     explained_total = None
     if total is not None or apps is not None:
         explained_total = float(total or 0.0) + float(apps or 0.0)
 
-    return cash, digital, apps, total, explained_total
+    return cash, digital, apps, apps_collected, total, explained_total
 
 
 def _delta_bucket(calc, total):
@@ -262,7 +263,7 @@ def dashboard_finanzas():
             recalc_day_status(b)
             t = day_totals(b)
             calc = float(t["profit"])
-            cash, digital, apps, total, explained_total = _real_parts(b)
+            cash, digital, apps, apps_collected, total, explained_total = _real_parts(b)
         else:
             calc = 0.0
             cash = None
@@ -270,6 +271,7 @@ def dashboard_finanzas():
             apps = None
             total = None
             explained_total = None
+            apps_collected = None
 
         if total is not None:
             real_accum += float(total)
@@ -278,18 +280,19 @@ def dashboard_finanzas():
             real_fina_accum += float(explained_total)
 
         cmp_rows.append(
-            {
-                "date": d,
-                "date_ar": fmt_date_ar(d),
-                "date_iso": d.isoformat(),
-                "calc": calc,
-                "cash": cash,
-                "digital": digital,
-                "apps": apps,
-                "real_total": total,
-                "explained_total": explained_total,
-            }
-        )
+        {
+            "date": d,
+            "date_ar": fmt_date_ar(d),
+            "date_iso": d.isoformat(),
+            "calc": calc,
+            "cash": cash,
+            "digital": digital,
+            "apps": apps,
+            "apps_collected": apps_collected,
+            "real_total": total,
+            "explained_total": explained_total,
+        }
+)
 
         cmp_dates.append(d.isoformat())
         cmp_labels.append(fmt_date_ar(d))
@@ -326,6 +329,7 @@ def dashboard_finanzas():
             or r["cash"] is not None
             or r["digital"] is not None
             or r["apps"] is not None
+            or r["apps_collected"] is not None
         )
 
     rows_with_data = [r for r in cmp_rows if _row_has_data(r)]
@@ -355,6 +359,9 @@ def dashboard_finanzas():
             f"<td>"
             f"<input form='{form_id}' name='real_apps_pending' placeholder='Apps' value='{_money_input(r['apps'])}' />"
             f"</td>"
+            f"<td>"
+            f"<input form='{form_id}' name='real_apps_collected' placeholder='Apps cobradas ($)' value='{_money_input(r['apps_collected'])}' />"
+            f"</td>"
             f"<td class='num'>"
             f"<button form='{form_id}' class='btn' type='submit' style='min-width:120px;'>Guardar</button>"
             f"</td>"
@@ -364,7 +371,7 @@ def dashboard_finanzas():
             "</tr>"
         )
 
-    head_html = "".join(_cmp_tr(r) for r in head_rows) if head_rows else "<tr><td colspan='9' class='muted'>Sin datos</td></tr>"
+    head_html = "".join(_cmp_tr(r) for r in head_rows) if head_rows else "<tr><td colspan='10' class='muted'>Sin datos</td></tr>"
     tail_html = "".join(_cmp_tr(r) for r in tail_rows)
 
     details_html = ""
@@ -381,6 +388,7 @@ def dashboard_finanzas():
                 <th style="text-align:center;">Ganancia Efectivo</th>
                 <th style="text-align:center;">Ganancia Digital</th>
                 <th style="text-align:center;">Apps pendientes</th>
+                <th style="text-align:center;">Apps cobradas</th>
                 <th style="text-align:center;"></th>
                 <th class="num">Ganancia Real Total</th>
                 <th class="num">Real + Apps</th>
@@ -537,6 +545,7 @@ def dashboard_finanzas():
             <th style="text-align:center;">Ganancia Efectivo</th>
             <th style="text-align:center;">Ganancia Digital</th>
             <th style="text-align:center;">Apps pendientes</th>
+            <th style="text-align:center;">Apps cobradas</th>
             <th style="text-align:center;"></th>
             <th class="num">Ganancia Real Total</th>
             <th class="num">Real + Apps</th>
@@ -819,6 +828,7 @@ def save_real_profit_json():
     v_cash = (request.form.get("real_cash_profit") or "").strip()
     v_digital = (request.form.get("real_digital_profit") or "").strip()
     v_apps = (request.form.get("real_apps_pending") or "").strip()
+    v_apps_collected = (request.form.get("real_apps_collected") or "").strip()
 
     if not day:
         return jsonify({"ok": False, "error": "Falta fecha"}), 400
@@ -832,6 +842,7 @@ def save_real_profit_json():
     cash = None if v_cash == "" else safe_float(v_cash)
     digital = None if v_digital == "" else safe_float(v_digital)
     apps = None if v_apps == "" else safe_float(v_apps)
+    apps_collected = None if v_apps_collected == "" else safe_float(v_apps_collected)
 
     bday = BusinessDay.query.filter_by(day=d).first()
     if not bday:
@@ -844,10 +855,11 @@ def save_real_profit_json():
     bday.real_cash_profit = cash
     bday.real_digital_profit = digital
     bday.real_apps_pending = apps
+    bday.real_apps_collected = apps_collected
 
     total = None
-    if cash is not None or digital is not None:
-        total = float(cash or 0.0) + float(digital or 0.0)
+    if cash is not None or digital is not None or apps_collected is not None:
+        total = float(cash or 0.0) + float(digital or 0.0) + float(apps_collected or 0.0)
         bday.real_profit = total
     else:
         bday.real_profit = None

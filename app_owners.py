@@ -122,6 +122,8 @@ def ensure_schema():
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_cash_profit DOUBLE PRECISION;"))
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_digital_profit DOUBLE PRECISION;"))
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_apps_pending DOUBLE PRECISION;"))
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_apps_collected DOUBLE PRECISION;"))
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS cash_balance DOUBLE PRECISION;"))
             db.session.commit()
             return
 
@@ -136,6 +138,10 @@ def ensure_schema():
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_digital_profit REAL;"))
         if "real_apps_pending" not in existing:
             db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_apps_pending REAL;"))
+        if "real_apps_collected" not in existing:
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_apps_collected REAL;"))
+        if "cash_balance" not in existing:
+            db.session.execute(text("ALTER TABLE business_days ADD COLUMN cash_balance REAL;"))
 
         db.session.commit()
     except Exception as e:
@@ -368,7 +374,7 @@ BASE_HTML = """
       vertical-align: bottom;
     }
     th.num{ text-align:right; }
-    td.num{ text-align:right; font-variant-numeric: tabular-nums; }
+    td.num{ text-align:right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     tr:hover td{ background: rgba(99,102,241,.06); }
 
     .pill{
