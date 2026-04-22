@@ -245,8 +245,6 @@ def dashboard_finanzas():
     calc_accum_running = 0.0
     real_accum_running = 0.0
     explained_accum_running = 0.0
-    apps_pending_accum = 0.0
-    apps_collected_accum = 0.0
     cmp_dates = []
     cmp_labels = []
     cmp_calc = []
@@ -264,17 +262,11 @@ def dashboard_finanzas():
             t = day_totals(b)
             calc = float(t["profit"])
             cash, digital, apps, apps_collected, total, explained_total = _real_parts(b)
-            # acumulamos pendientes y cobradas
             if apps is not None:
-                apps_pending_accum += float(apps)
+                pending_net = float(apps)
+            else:
+                pending_net = 0.0
 
-            if apps_collected is not None:
-                apps_collected_accum += float(apps_collected)
-
-            # calculamos pendientes netos
-            pending_net = apps_pending_accum - apps_collected_accum
-
-            # nueva lógica correcta
             if total is not None or pending_net != 0:
                 explained_total = float(total or 0.0) + pending_net
             else:
@@ -324,6 +316,7 @@ def dashboard_finanzas():
 
         if explained_total is not None:
             explained_accum_running += float(explained_total)
+
         cmp_explained_accum.append(round(explained_accum_running, 2))
 
     cmp_payload = {
