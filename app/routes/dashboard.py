@@ -262,10 +262,13 @@ def dashboard_finanzas():
             t = day_totals(b)
             calc = float(t["profit"])
             cash, digital, apps, apps_collected, total, explained_total = _real_parts(b)
+            pending_net = 0.0
+
             if apps is not None:
-                pending_net = float(apps)
-            else:
-                pending_net = 0.0
+                pending_net += float(apps)
+
+            if apps_collected is not None:
+                pending_net -= float(apps_collected)
 
             if total is not None or pending_net != 0:
                 explained_total = float(total or 0.0) + pending_net
@@ -884,10 +887,20 @@ def save_real_profit_json():
     explained_html = "<span class='muted'>—</span>"
     desfasaje_html = "<span class='muted'>—</span>"
 
-    if total is not None:
-        explained_total = total
+    pending_net = 0.0
+
+    if apps is not None:
+        pending_net += float(apps)
+
+    if apps_collected is not None:
+        pending_net -= float(apps_collected)
+
+    if total is not None or pending_net != 0:
+        explained_total = float(total or 0.0) + pending_net
         explained_html = _explained_html(calc, explained_total)
         desfasaje_html = _desfasaje_html(calc, explained_total)
+    else:
+        explained_total = None
 
     return jsonify({
         "ok": True,
