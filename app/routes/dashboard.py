@@ -51,8 +51,6 @@ def _real_parts(bday):
         total = float(cash or 0.0) + float(digital or 0.0) + float(apps_collected or 0.0)
 
     explained_total = None
-    if total is not None or apps is not None:
-        explained_total = float(total or 0.0) + float(apps or 0.0)
 
     return cash, digital, apps, apps_collected, total, explained_total
 
@@ -247,6 +245,8 @@ def dashboard_finanzas():
     calc_accum_running = 0.0
     real_accum_running = 0.0
     explained_accum_running = 0.0
+    apps_pending_accum = 0.0
+    apps_collected_accum = 0.0
     cmp_dates = []
     cmp_labels = []
     cmp_calc = []
@@ -264,6 +264,21 @@ def dashboard_finanzas():
             t = day_totals(b)
             calc = float(t["profit"])
             cash, digital, apps, apps_collected, total, explained_total = _real_parts(b)
+            # acumulamos pendientes y cobradas
+            if apps is not None:
+                apps_pending_accum += float(apps)
+
+            if apps_collected is not None:
+                apps_collected_accum += float(apps_collected)
+
+            # calculamos pendientes netos
+            pending_net = apps_pending_accum - apps_collected_accum
+
+            # nueva lógica correcta
+            if total is not None or pending_net != 0:
+                explained_total = float(total or 0.0) + pending_net
+            else:
+                explained_total = None
         else:
             calc = 0.0
             cash = None
@@ -876,8 +891,8 @@ def save_real_profit_json():
     explained_html = "<span class='muted'>—</span>"
     desfasaje_html = "<span class='muted'>—</span>"
 
-    if total is not None or apps is not None:
-        explained_total = float(total or 0.0) + float(apps or 0.0)
+    if total is not None:
+        explained_total = total
         explained_html = _explained_html(calc, explained_total)
         desfasaje_html = _desfasaje_html(calc, explained_total)
 
