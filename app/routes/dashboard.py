@@ -4,6 +4,8 @@ import json
 from flask import Blueprint, request, jsonify
 from flask_login import login_required
 from sqlalchemy import func
+from app.services.finance_service import compute_explained_total, compute_real_total, compute_pending_net
+from app.services.accumulator_service import Accumulator
 
 from app.extensions import db
 from app.models import BusinessDay, ExpenseCategory, ExpenseEntry
@@ -240,19 +242,13 @@ def dashboard_finanzas():
     bmap = {b.day: b for b in bdays}
 
     cmp_rows = []
-    real_accum = 0.0
-    real_fina_accum = 0.0
-    calc_accum_running = 0.0
-    real_accum_running = 0.0
-    explained_accum_running = 0.0
     cmp_dates = []
     cmp_labels = []
     cmp_calc = []
     cmp_real = []
     cmp_explained = []
-    cmp_calc_accum = []
-    cmp_real_accum = []
-    cmp_explained_accum = []
+    acc = Accumulator()
+
 
     for d in all_days:
         b = bmap.get(d)
@@ -262,18 +258,7 @@ def dashboard_finanzas():
             t = day_totals(b)
             calc = float(t["profit"])
             cash, digital, apps, apps_collected, total, explained_total = _real_parts(b)
-            pending_net = 0.0
-
-            if apps is not None:
-                pending_net += float(apps)
-
-            if apps_collected is not None:
-                pending_net -= float(apps_collected)
-
-            if total is not None or pending_net != 0:
-                explained_total = float(total or 0.0) + pending_net
-            else:
-                explained_total = None
+            explained_total = compute_explained_total(cash, digital, apps, apps_collected)
         else:
             calc = 0.0
             cash = None
@@ -282,12 +267,6 @@ def dashboard_finanzas():
             total = None
             explained_total = None
             apps_collected = None
-
-        if total is not None:
-            real_accum += float(total)
-
-        if explained_total is not None:
-            real_fina_accum += float(explained_total)
 
         cmp_rows.append(
         {
@@ -309,18 +288,17 @@ def dashboard_finanzas():
         cmp_calc.append(round(calc, 2))
         cmp_real.append(None if total is None else round(float(total), 2))
         cmp_explained.append(None if explained_total is None else round(float(explained_total), 2))
+        
+        acc.add(calc, total, explained_total)
+    
+    series = acc.get_series()
 
-        calc_accum_running += float(calc)
-        cmp_calc_accum.append(round(calc_accum_running, 2))
+    cmp_calc_accum = series["calc"]
+    cmp_real_accum = series["real"]
+    cmp_explained_accum = series["explained"]
 
-        if total is not None:
-            real_accum_running += float(total)
-        cmp_real_accum.append(round(real_accum_running, 2))
-
-        if explained_total is not None:
-            explained_accum_running += float(explained_total)
-
-        cmp_explained_accum.append(round(explained_accum_running, 2))
+    real_accum = cmp_real_accum[-1] if cmp_real_accum else 0.0
+    real_fina_accum = cmp_explained_accum[-1] if cmp_explained_accum else 0.0
 
     cmp_payload = {
         "dates": cmp_dates,
@@ -883,24 +861,14 @@ def save_real_profit_json():
     calc = float(t["profit"])
     total_html = _total_html(calc, total)
 
-    explained_total = None
-    explained_html = "<span class='muted'>—</span>"
-    desfasaje_html = "<span class='muted'>—</span>"
+    explained_total = compute_explained_total(cash, digital, apps, apps_collected)
 
-    pending_net = 0.0
-
-    if apps is not None:
-        pending_net += float(apps)
-
-    if apps_collected is not None:
-        pending_net -= float(apps_collected)
-
-    if total is not None or pending_net != 0:
-        explained_total = float(total or 0.0) + pending_net
+    if explained_total is not None:
         explained_html = _explained_html(calc, explained_total)
         desfasaje_html = _desfasaje_html(calc, explained_total)
     else:
-        explained_total = None
+        explained_html = "<span class='muted'>—</span>"
+        desfasaje_html = "<span class='muted'>—</span>"
 
     return jsonify({
         "ok": True,
