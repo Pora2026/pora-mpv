@@ -114,6 +114,17 @@ def edit_day(day):
     ensure_shifts(bday)
     recalc_day_status(bday)
     db.session.commit()
+    
+    if bday.opening_cash_balance is None:
+        prev_day = (
+            BusinessDay.query
+            .filter(BusinessDay.day < bday.day)
+            .order_by(BusinessDay.day.desc())
+            .first()
+        )
+
+        if prev_day and prev_day.actual_cash_balance is not None:
+            bday.opening_cash_balance = float(prev_day.actual_cash_balance)
 
     var_cats = ExpenseCategory.query.filter_by(kind="variable").order_by(ExpenseCategory.name.asc()).all()
     fix_cats = ExpenseCategory.query.filter_by(kind="fixed").order_by(ExpenseCategory.name.asc()).all()
@@ -153,10 +164,6 @@ def edit_day(day):
         s = shifts.get(sh)
         return (s.note or "") if s else ""
 
-    def c(sh):
-        s = shifts.get(sh)
-        return "checked" if (s and bool(getattr(s, "is_closed", False))) else ""
-
     real_cash = getattr(bday, "real_cash_profit", None)
     real_digital = getattr(bday, "real_digital_profit", None)
     real_apps = getattr(bday, "real_apps_pending", None)
@@ -165,6 +172,93 @@ def edit_day(day):
         real_cash = float(bday.real_profit)
     if real_digital is None:
         real_digital = 0.0 if getattr(bday, "real_profit", None) is not None else None
+
+    daily_liquidity = (
+        float(getattr(bday, "daily_mercadopago", 0.0) or 0.0)
+        + float(getattr(bday, "daily_cash_withdrawn", 0.0) or 0.0)
+        + float(getattr(bday, "real_apps_collected", 0.0) or 0.0)
+    )
+    
+    net_daily_liquidity = (
+        daily_liquidity
+        - float(totals["expense_total"] or 0.0)
+    )
+    
+    expected_cash = (
+    float(getattr(bday, "opening_cash_balance", 0.0) or 0.0)
+        + net_daily_liquidity
+        - float(getattr(bday, "safe_box_transfer", 0.0) or 0.0)
+    )
+
+    real_cash_difference = (
+        float(getattr(bday, "actual_cash_balance", 0.0) or 0.0)
+        - expected_cash
+    )
+
+    cash_difference_percent = 0.0
+
+    if expected_cash > 0:
+        cash_difference_percent = (
+            abs(real_cash_difference) / expected_cash
+        ) * 100
+    
+    cash_status_class = (
+        "income"
+        if cash_difference_percent <= 2
+        else "profit"
+        if cash_difference_percent <= 10
+        else "expense"
+    )
+
+    # Acumulados del período mensual.
+    # El saldo inicial se toma una sola vez desde el primer día cargado del mes.
+    month_start = bday.day.replace(day=1)
+
+    period_days = (
+        BusinessDay.query
+        .filter(BusinessDay.day >= month_start)
+        .filter(BusinessDay.day <= bday.day)
+        .order_by(BusinessDay.day.asc())
+        .all()
+    )
+
+    ganancia_calculada_acumulada = 0.0
+    ganancia_liquida_acumulada = 0.0
+
+    if period_days:
+        saldo_inicial_periodo = float(
+            getattr(period_days[0], "opening_cash_balance", 0.0) or 0.0
+        )
+
+        ganancia_calculada_acumulada = saldo_inicial_periodo
+        ganancia_liquida_acumulada = saldo_inicial_periodo
+
+        for dia_periodo in period_days:
+            if is_sunday(dia_periodo.day):
+                continue
+
+            ensure_shifts(dia_periodo)
+            recalc_day_status(dia_periodo)
+
+            totales_periodo = day_totals(dia_periodo)
+
+            ganancia_calculada_dia = float(
+                totales_periodo["profit"] or 0.0
+            )
+
+            liquidez_diaria_periodo = (
+                float(getattr(dia_periodo, "daily_mercadopago", 0.0) or 0.0)
+                + float(getattr(dia_periodo, "daily_cash_withdrawn", 0.0) or 0.0)
+                + float(getattr(dia_periodo, "real_apps_collected", 0.0) or 0.0)
+            )
+
+            ganancia_liquida_dia = (
+                liquidez_diaria_periodo
+                - float(totales_periodo["expense_total"] or 0.0)
+            )
+
+            ganancia_calculada_acumulada += ganancia_calculada_dia
+            ganancia_liquida_acumulada += ganancia_liquida_dia
 
     body = f"""
     <h1>Editar día {fmt_date_ar(bday.day)}</h1>
@@ -178,9 +272,7 @@ def edit_day(day):
         <div class="grid" style="margin-top:12px;">
           <div class="card">
             <h3>Turno Mañana</h3>
-            <label><input type="checkbox" name="Mañana_closed" {c("Mañana")}> Turno cerrado</label>
-            <div style="height:10px;"></div>
-
+           
             <label>Ingreso</label>
             <input name="Mañana_income" value="{v("Mañana","income")}" />
             <div style="height:10px;"></div>
@@ -191,8 +283,6 @@ def edit_day(day):
 
           <div class="card">
             <h3>Turno Tarde</h3>
-            <label><input type="checkbox" name="Tarde_closed" {c("Tarde")}> Turno cerrado</label>
-            <div style="height:10px;"></div>
 
             <label>Ingreso</label>
             <input name="Tarde_income" value="{v("Tarde","income")}" />
@@ -209,7 +299,7 @@ def edit_day(day):
             La ganancia real representa lo efectivamente cobrado. “Apps pendientes” sirve para explicar parte del desfase contra la calculada, sin sumarlo a caja real.
           </p>
 
-          <div class="grid3">
+        <div class="grid3">
             <div>
               <label>Ganancia en efectivo</label>
               <input name="real_cash_profit" value="{_money_input(real_cash)}" placeholder="Ej: 250000" />
@@ -224,12 +314,40 @@ def edit_day(day):
               <label>Apps pendientes (PY + Rappi)</label>
               <input name="real_apps_pending" value="{_money_input(real_apps)}" placeholder="Ej: 95000" />
             </div>
-            
+
             <div>
               <label>Apps cobradas</label>
               <input name="real_apps_collected" value="{_money_input(getattr(bday, 'real_apps_collected', None))}" placeholder="Ej: 120000" />
             </div>
-          </div>
+            
+            <div>
+              <label>Mercado Pago diario</label>
+              <input name="daily_mercadopago"
+                     value="{_money_input(getattr(bday, 'daily_mercadopago', None))}"
+                     placeholder="Ej: 250000" />
+            </div>
+
+            <div>
+              <label>Efectivo retirado</label>
+              <input name="daily_cash_withdrawn"
+                     value="{_money_input(getattr(bday, 'daily_cash_withdrawn', None))}"
+                     placeholder="Ej: 180000" />
+            </div>
+
+            <div>
+              <label>Saldo inicial caja</label>
+              <input name="cash_opening_balance" value="{_money_input(getattr(bday, 'opening_cash_balance', None))}" placeholder="Ej: 50000" />
+            </div>
+
+            <div>
+              <label>Retiro para ahorros</label>
+              <input name="cash_transfer_out" value="{_money_input(getattr(bday, 'safe_box_transfer', None))}" placeholder="Ej: 100000" />
+            </div>
+
+            <div>
+              <label>Liquidez Real (Plata contada realmente)</label>
+              <input name="cash_real_balance" value="{_money_input(getattr(bday, 'actual_cash_balance', None))}" placeholder="Ej: 145000" />
+            </div>
         </div>
 
         <div style="height:12px;"></div>
@@ -338,23 +456,58 @@ def edit_day(day):
     <div class="card">
       <h3>Bloque 5 · Totales del día</h3>
       <div class="grid4">
-        <div class="kpi income" style="padding:14px;">
-          <div class="label">Ingresos</div>
-          <div class="value">{ars(totals["income"])}</div>
+
+      <div class="kpi blue" style="padding:14px;">
+        <div class="label">Ingresos</div>
+        <div class="value">{ars(totals["income"])}</div>
+      </div>
+      
+      <div class="kpi expense" style="padding:14px; grid-row: span 2;">
+        <div class="label">Gasto total</div>
+        <div class="value">{ars(totals["expense_total"])}</div>
+        <div class="muted">
+          Variable: {ars(totals["variable_expense"])}
+          · Fijo: {ars(totals["fixed_expense"])}
         </div>
-        <div class="kpi expense" style="padding:14px;">
-          <div class="label">Gasto total</div>
-          <div class="value">{ars(totals["expense_total"])}</div>
-          <div class="muted">Variable: {ars(totals["variable_expense"])} · Fijo: {ars(totals["fixed_expense"])}</div>
+      </div>       
+      
+      <div class="kpi blue" style="padding:14px;">
+        <div class="label">Ganancia (calculada)</div>
+        <div class="value">{ars(totals["profit"])}</div>
+      </div>
+
+    <div class="kpi blue" style="padding:14px;">
+        <div class="label">Ganancia calculada acumulada</div>
+
+        <div class="value">{ars(ganancia_calculada_acumulada)}</div>
+
+        <div class="muted">
+          Incluye saldo inicial del mes
+        </div>       
+    </div>        
+      
+      <div class="kpi blue" style="padding:14px;">
+        <div class="label">Liquidez diaria</div>
+        <div class="value">{ars(daily_liquidity)}</div>
+      </div>
+
+      <div class="kpi profit" style="padding:14px;">
+        <div class="label">Ganancia líquida</div>
+        <div class="value">{ars(net_daily_liquidity)}</div>
+      </div>
+
+    <div class="kpi profit" style="padding:14px;">
+
+        <div class="label">Ganancia líquida acumulada</div>
+
+        <div class="value">
+            {ars(ganancia_liquida_acumulada)}
         </div>
-        <div class="kpi profit" style="padding:14px;">
-          <div class="label">Ganancia (calculada)</div>
-          <div class="value">{ars(totals["profit"])}</div>
+
+        <div class="muted">
+            Incluye saldo inicial del mes
         </div>
-        <div class="kpi" style="padding:14px;">
-          <div class="label">Estado</div>
-          <div class="value"><span class="pill {'ok' if bday.status=='complete' else 'warn'}">{bday.status}</span></div>
-        </div>
+
       </div>
     </div>
     """
@@ -387,17 +540,27 @@ def save_day(day):
 
         sr.income = safe_float(request.form.get(f"{sh}_income"))
         sr.note = (request.form.get(f"{sh}_note") or "").strip()
-        sr.is_closed = True if request.form.get(f"{sh}_closed") == "on" else False
+        sr.is_closed = bool(sr.income and sr.income > 0)
 
     cash_raw = (request.form.get("real_cash_profit") or "").strip()
     digital_raw = (request.form.get("real_digital_profit") or "").strip()
     apps_raw = (request.form.get("real_apps_pending") or "").strip()
     apps_collected_raw = (request.form.get("real_apps_collected") or "").strip()
+    mercadopago_raw = (request.form.get("daily_mercadopago") or "").strip()
+    withdrawn_raw = (request.form.get("daily_cash_withdrawn") or "").strip()
+    opening_raw = (request.form.get("cash_opening_balance") or "").strip()
+    transfer_raw = (request.form.get("cash_transfer_out") or "").strip()
+    real_balance_raw = (request.form.get("cash_real_balance") or "").strip()
     bday.real_apps_collected = None if apps_collected_raw == "" else safe_float(apps_collected_raw)
+    bday.daily_mercadopago = None if mercadopago_raw == "" else safe_float(mercadopago_raw)
+    bday.daily_cash_withdrawn = None if withdrawn_raw == "" else safe_float(withdrawn_raw)
 
     bday.real_cash_profit = None if cash_raw == "" else safe_float(cash_raw)
     bday.real_digital_profit = None if digital_raw == "" else safe_float(digital_raw)
     bday.real_apps_pending = None if apps_raw == "" else safe_float(apps_raw)
+    bday.opening_cash_balance = None if opening_raw == "" else safe_float(opening_raw)
+    bday.safe_box_transfer = None if transfer_raw == "" else safe_float(transfer_raw)
+    bday.actual_cash_balance = None if real_balance_raw == "" else safe_float(real_balance_raw)
 
     if (
         bday.real_cash_profit is not None
@@ -412,6 +575,32 @@ def save_day(day):
     else:
         t = day_totals(bday)
         bday.real_profit = float(t["profit"])
+
+    daily_liquidity = (
+    float(bday.daily_mercadopago or 0.0)
+    + float(bday.daily_cash_withdrawn or 0.0)
+    + float(bday.real_apps_collected or 0.0)
+    )
+
+    net_daily_liquidity = (
+        daily_liquidity
+        - float(day_totals(bday)["expense_total"] or 0.0)
+    )
+
+    expected_cash = (
+        float(bday.opening_cash_balance or 0.0)
+        + net_daily_liquidity
+        - float(bday.safe_box_transfer or 0.0)
+    )
+
+    bday.expected_cash_balance = expected_cash
+
+    if bday.actual_cash_balance is not None:
+        bday.cash_difference = (
+            float(bday.actual_cash_balance) - expected_cash
+        )
+    else:
+        bday.cash_difference = None
 
     recalc_day_status(bday)
     db.session.commit()

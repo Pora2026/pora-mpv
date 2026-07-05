@@ -116,34 +116,162 @@ def ensure_admin():
 
 def ensure_schema():
     dialect = db.engine.dialect.name
+
     try:
+        # =====================================================
+        # POSTGRESQL
+        # =====================================================
+
         if dialect == "postgresql":
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_profit DOUBLE PRECISION;"))
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_cash_profit DOUBLE PRECISION;"))
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_digital_profit DOUBLE PRECISION;"))
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_apps_pending DOUBLE PRECISION;"))
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_apps_collected DOUBLE PRECISION;"))
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN IF NOT EXISTS cash_balance DOUBLE PRECISION;"))
+
+            # legacy
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_profit DOUBLE PRECISION;"
+            ))
+
+            # real
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_cash_profit DOUBLE PRECISION;"
+            ))
+
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_digital_profit DOUBLE PRECISION;"
+            ))
+
+            # apps
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_apps_pending DOUBLE PRECISION;"
+            ))
+
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS real_apps_collected DOUBLE PRECISION;"
+            ))
+
+            # caja legacy
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS cash_balance DOUBLE PRECISION;"
+            ))
+
+            # =====================================================
+            # NUEVA ARQUITECTURA LIQUIDEZ
+            # =====================================================
+
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS opening_cash_balance DOUBLE PRECISION;"
+            ))
+
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS expected_cash_balance DOUBLE PRECISION;"
+            ))
+
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS actual_cash_balance DOUBLE PRECISION;"
+            ))
+
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS cash_difference DOUBLE PRECISION;"
+            ))
+
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS safe_box_transfer DOUBLE PRECISION;"
+            ))
+
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS daily_mercadopago DOUBLE PRECISION;"
+            ))
+
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS daily_cash_withdrawn DOUBLE PRECISION;"
+            ))
+
             db.session.commit()
             return
 
-        cols = db.session.execute(text("PRAGMA table_info(business_days);")).fetchall()
+        # =====================================================
+        # SQLITE
+        # =====================================================
+
+        cols = db.session.execute(
+            text("PRAGMA table_info(business_days);")
+        ).fetchall()
+
         existing = {c[1] for c in cols}
 
+        # legacy
         if "real_profit" not in existing:
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_profit REAL;"))
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN real_profit REAL;"
+            ))
+
+        # real
         if "real_cash_profit" not in existing:
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_cash_profit REAL;"))
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN real_cash_profit REAL;"
+            ))
+
         if "real_digital_profit" not in existing:
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_digital_profit REAL;"))
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN real_digital_profit REAL;"
+            ))
+
+        # apps
         if "real_apps_pending" not in existing:
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_apps_pending REAL;"))
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN real_apps_pending REAL;"
+            ))
+
         if "real_apps_collected" not in existing:
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN real_apps_collected REAL;"))
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN real_apps_collected REAL;"
+            ))
+
+        # caja legacy
         if "cash_balance" not in existing:
-            db.session.execute(text("ALTER TABLE business_days ADD COLUMN cash_balance REAL;"))
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN cash_balance REAL;"
+            ))
+
+        # =====================================================
+        # NUEVA ARQUITECTURA LIQUIDEZ
+        # =====================================================
+
+        if "opening_cash_balance" not in existing:
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN opening_cash_balance REAL;"
+            ))
+
+        if "expected_cash_balance" not in existing:
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN expected_cash_balance REAL;"
+            ))
+
+        if "actual_cash_balance" not in existing:
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN actual_cash_balance REAL;"
+            ))
+
+        if "cash_difference" not in existing:
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN cash_difference REAL;"
+            ))
+
+        if "safe_box_transfer" not in existing:
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN safe_box_transfer REAL;"
+            ))
+
+        if "daily_mercadopago" not in existing:
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN daily_mercadopago REAL;"
+            ))
+
+        if "daily_cash_withdrawn" not in existing:
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN daily_cash_withdrawn REAL;"
+            ))
 
         db.session.commit()
+
     except Exception as e:
         db.session.rollback()
         print("ERROR ensure_schema:", e)
@@ -323,6 +451,11 @@ BASE_HTML = """
     .kpi.income { background: var(--incomeBg); }
     .kpi.expense { background: var(--expenseBg); }
     .kpi.profit { background: var(--profitBg); }
+    
+    .kpi.blue {
+      background: #d9e8ee;
+      border: 1px solid #7aa6b8;
+    }
 
     .muted{ color:var(--muted); font-size: 13px; }
 
@@ -461,7 +594,8 @@ BASE_HTML = """
     <a href="{{ url_for('io_bp.io_dashboard') }}">Gestión Ingresos y Gastos</a>
     <a href="{{ url_for('days_bp.list_days') }}">Días</a>
     <a href="{{ url_for('import_export_bp.import_balance_get') }}">Importar Balance</a>
-    <a href="{{ url_for('import_export_bp.export_get') }}">Exportar</a>
+    <a href="{{ url_for('backup_bp.backup_home') }}">Backup</a>
+    <a href="{{ url_for('import_export_bp.export_get') }}">Exportar legacy</a>
     <a href="{{ url_for('auth_bp.logout') }}">Salir</a>
   </div>
   {% endif %}
@@ -513,6 +647,7 @@ from app.routes.dashboard import dashboard_bp
 from app.routes.days import days_bp
 from app.routes.io import io_bp
 from app.routes.import_export import import_export_bp
+from app.routes.backup import backup_bp
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(home_bp)
@@ -520,6 +655,7 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(days_bp)
 app.register_blueprint(io_bp)
 app.register_blueprint(import_export_bp)
+app.register_blueprint(backup_bp)
 
 with app.app_context():
     db.create_all()

@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Variables y secretos
+.env
+.env.*
+!.env.example
+
+# Bases de datos y datos locales
+instance/
+*.db
+*.sqlite
+*.sqlite3
+backup/
+data/
+
+# Exportaciones y archivos temporales
+*.xlsx
+*.xls
+*.zip
+verify_post_restore_ids.py
+
+# Herramientas y sistema
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -94,6 +94,18 @@ def _desfasaje_html(calc, explained_total):
     return f"<span class='pill {cls}'>{ars(diff)}</span>"
 
 
+def _desfasaje_pct(liquid_accum, real_accum):
+    if liquid_accum is None or real_accum is None:
+        return "<span class='muted'>—</span>"
+    if abs(float(liquid_accum)) < 1e-9:
+        return "<span class='muted'>—</span>"
+
+    pct = abs(float(real_accum) - float(liquid_accum)) / abs(float(liquid_accum)) * 100
+
+    cls = "ok" if pct <= 10 else ("warn" if pct <= 20 else "bad")
+    return f"<span class='pill {cls}'>{pct:.1f}%</span>"
+
+
 @dashboard_bp.get("/finanzas")
 @login_required
 def dashboard_finanzas():
@@ -125,7 +137,6 @@ def dashboard_finanzas():
 
     margen_periodo = (profit / income * 100.0) if income else None
     bucket_label, bucket_class = margin_bucket(margen_periodo)
-    promedio_diario = (income / len(series)) if series else 0.0
 
     sueldo_ximena = (
         db.session.query(func.coalesce(func.sum(ExpenseEntry.amount), 0.0))
@@ -241,153 +252,204 @@ def dashboard_finanzas():
     )
     bmap = {b.day: b for b in bdays}
 
+    # KPI existente: se mantiene la lectura de liquidez real cargada en los días.
+    liquidez_real_acumulada = sum(
+        float(getattr(b, "actual_cash_balance", 0.0) or 0.0)
+        for b in bdays
+    )
+
+    # KPI existente de ganancia real: se conserva para no tocar el bloque superior.
+    real_accum = 0.0
+    real_fina_accum = 0.0
+    for b in bdays:
+        cash, digital, apps, apps_collected, total, explained_total = _real_parts(b)
+        explained_total = compute_explained_total(cash, digital, apps, apps_collected)
+        if total is not None:
+            real_accum += float(total or 0.0)
+        if explained_total is not None:
+            real_fina_accum += float(explained_total or 0.0)
+
     cmp_rows = []
     cmp_dates = []
     cmp_labels = []
-    cmp_calc = []
-    cmp_real = []
-    cmp_explained = []
-    acc = Accumulator()
 
+    cmp_calc = []
+    cmp_liquid_profit = []
+    cmp_real_profit = []
+
+    cmp_calc_accum = []
+    cmp_liquid_profit_accum = []
+    cmp_real_profit_accum = []
+
+    # Cada acumulado mantiene su propia lógica.
+    # Tomar el saldo inicial del primer día hábil del período.
+    saldo_inicial_periodo = 0.0
+    for _b in bdays:
+        if getattr(_b, "opening_cash_balance", None) is not None:
+            saldo_inicial_periodo = float(getattr(_b, "opening_cash_balance", 0.0) or 0.0)
+            break
+
+    calc_running = None
+    liquid_profit_running = None
 
     for d in all_days:
         b = bmap.get(d)
+
         if b:
             ensure_shifts(b)
             recalc_day_status(b)
             t = day_totals(b)
-            calc = float(t["profit"])
-            cash, digital, apps, apps_collected, total, explained_total = _real_parts(b)
-            explained_total = compute_explained_total(cash, digital, apps, apps_collected)
+
+            # Ganancia calculada = ventas - gastos.
+            calc = float(t["profit"] or 0.0)
+
+            # Ganancia líquida = liquidez diaria - gasto total.
+            daily_liquidity = (
+                float(getattr(b, "daily_mercadopago", 0.0) or 0.0)
+                + float(getattr(b, "daily_cash_withdrawn", 0.0) or 0.0)
+                + float(getattr(b, "real_apps_collected", 0.0) or 0.0)
+            )
+
+            has_liquid_data = (
+                getattr(b, "daily_mercadopago", None) is not None
+                or getattr(b, "daily_cash_withdrawn", None) is not None
+                or getattr(b, "real_apps_collected", None) is not None
+            )
+
+            liquid_profit = (
+                daily_liquidity - float(t["expense_total"] or 0.0)
+                if has_liquid_data
+                else None
+            )
+
+            # Ganancia real diaria:
+            # ganancia en efectivo + ganancia digital, ambos cargados manualmente.
+            has_real_data = (
+                getattr(b, "real_cash_profit", None) is not None
+                or getattr(b, "real_digital_profit", None) is not None
+            )
+
+            real_profit = (
+                float(getattr(b, "real_cash_profit", 0.0) or 0.0)
+                + float(getattr(b, "real_digital_profit", 0.0) or 0.0)
+                if has_real_data
+                else None
+            )
+
+            # Ganancia real acumulada:
+            # liquidez real cargada manualmente.
+            real_profit_accum = (
+                float(getattr(b, "actual_cash_balance", 0.0) or 0.0)
+                if getattr(b, "actual_cash_balance", None) is not None
+                else None
+            )
         else:
             calc = 0.0
-            cash = None
-            digital = None
-            apps = None
-            total = None
-            explained_total = None
-            apps_collected = None
+            liquid_profit = None
+            real_profit = None
+            real_profit_accum = None
+
+        if calc_running is None:
+            calc_running = saldo_inicial_periodo + float(calc or 0.0)
+        else:
+            calc_running += float(calc or 0.0)
+
+        if liquid_profit is not None:
+            if liquid_profit_running is None:
+                liquid_profit_running = saldo_inicial_periodo + float(liquid_profit or 0.0)
+            else:
+                liquid_profit_running += float(liquid_profit or 0.0)
 
         cmp_rows.append(
-        {
-            "date": d,
-            "date_ar": fmt_date_ar(d),
-            "date_iso": d.isoformat(),
-            "calc": calc,
-            "cash": cash,
-            "digital": digital,
-            "apps": apps,
-            "apps_collected": apps_collected,
-            "real_total": total,
-            "explained_total": explained_total,
-        }
-)
+            {
+                "date": d,
+                "date_ar": fmt_date_ar(d),
+                "date_iso": d.isoformat(),
+                "calc": calc,
+                "calc_accum": calc_running,
+                "liquid_profit": liquid_profit,
+                "liquid_profit_accum": liquid_profit_running,
+                "real_profit": real_profit,
+                "real_profit_accum": real_profit_accum,
+            }
+        )
 
         cmp_dates.append(d.isoformat())
         cmp_labels.append(fmt_date_ar(d))
+
         cmp_calc.append(round(calc, 2))
-        cmp_real.append(None if total is None else round(float(total), 2))
-        cmp_explained.append(None if explained_total is None else round(float(explained_total), 2))
-        
-        acc.add(calc, total, explained_total)
-    
-    series = acc.get_series()
+        cmp_liquid_profit.append(None if liquid_profit is None else round(float(liquid_profit), 2))
+        cmp_real_profit.append(None if real_profit is None else round(float(real_profit), 2))
 
-    cmp_calc_accum = series["calc"]
-    cmp_real_accum = series["real"]
-    cmp_explained_accum = series["explained"]
-
-    real_accum = cmp_real_accum[-1] if cmp_real_accum else 0.0
-    real_fina_accum = cmp_explained_accum[-1] if cmp_explained_accum else 0.0
+        cmp_calc_accum.append(round(calc_running, 2))
+        cmp_liquid_profit_accum.append(
+            None if liquid_profit_running is None else round(liquid_profit_running, 2)
+        )
+        cmp_real_profit_accum.append(None if real_profit_accum is None else round(float(real_profit_accum), 2))
 
     cmp_payload = {
         "dates": cmp_dates,
         "labels": cmp_labels,
         "calc": cmp_calc,
-        "real": cmp_real,
-        "explained": cmp_explained,
+        "liquid_profit": cmp_liquid_profit,
+        "real_profit": cmp_real_profit,
         "calc_accum": cmp_calc_accum,
-        "real_accum": cmp_real_accum,
-        "explained_accum": cmp_explained_accum,
+        "liquid_profit_accum": cmp_liquid_profit_accum,
+        "real_profit_accum": cmp_real_profit_accum,
     }
     cmp_json = json.dumps(cmp_payload, ensure_ascii=False)
 
     def _row_has_data(r):
         return (
             abs(float(r["calc"] or 0.0)) > 0
-            or r["cash"] is not None
-            or r["digital"] is not None
-            or r["apps"] is not None
-            or r["apps_collected"] is not None
+            or r["liquid_profit"] is not None
+            or r["real_profit"] is not None
+            or r["real_profit_accum"] is not None
         )
 
-    rows_with_data = [r for r in cmp_rows if _row_has_data(r)]
-    rows_without_data = [r for r in cmp_rows if not _row_has_data(r)]
+    rows_with_data = [
+        r for r in cmp_rows
+        if _row_has_data(r)
+    ]
 
-    head_rows = rows_with_data[-5:]
-    tail_rows = rows_with_data[:-5] + rows_without_data
+    # Mostrar únicamente días con datos, del más reciente al más antiguo.
+    rows_with_data.sort(key=lambda r: r["date"], reverse=True)
+    
+    def _fmt_or_dash(value):
+        if value is None:
+            return "<span class='muted'>—</span>"
+        return ars(value)
 
     def _cmp_tr(r):
-        form_id = f"rp_{r['date_iso']}"
-        total_html = _total_html(r["calc"], r["real_total"])
-        explained_html = _explained_html(r["calc"], r["explained_total"])
-        desfasaje_html = _desfasaje_html(r["calc"], r["explained_total"])
+        liquid_profit_html = _fmt_or_dash(r["liquid_profit"])
+        real_profit_html = _fmt_or_dash(r["real_profit"])
+        real_profit_accum_html = _fmt_or_dash(r["real_profit_accum"])
+
+        desfasaje_html = _desfasaje_pct(
+            r["liquid_profit_accum"],
+            r["real_profit_accum"],
+        )
+
         return (
             "<tr>"
             f"<td>{r['date_ar']}</td>"
-            f"<td class='num'>{ars(r['calc'])}</td>"
-            f"<td>"
-            f"<form id='{form_id}' class='realProfitForm' data-day='{r['date_iso']}' style='margin:0;'>"
-            f"<input type='hidden' name='day' value='{r['date_iso']}' />"
-            f"</form>"
-            f"<input form='{form_id}' name='real_cash_profit' placeholder='Efectivo' value='{_money_input(r['cash'])}' />"
-            f"</td>"
-            f"<td>"
-            f"<input form='{form_id}' name='real_digital_profit' placeholder='Digital' value='{_money_input(r['digital'])}' />"
-            f"</td>"
-            f"<td>"
-            f"<input form='{form_id}' name='real_apps_pending' placeholder='Apps' value='{_money_input(r['apps'])}' />"
-            f"</td>"
-            f"<td>"
-            f"<input form='{form_id}' name='real_apps_collected' placeholder='Apps cobradas ($)' value='{_money_input(r['apps_collected'])}' />"
-            f"</td>"
-            f"<td class='num'>"
-            f"<button form='{form_id}' class='btn' type='submit' style='min-width:120px;'>Guardar</button>"
-            f"</td>"
-            f"<td class='num totalCell'>{total_html}</td>"
-            f"<td class='num explainedCell'>{explained_html}</td>"
-            f"<td class='num desfasajeCell'>{desfasaje_html}</td>"
+            f"<td class='num' style='color:#2563eb; font-weight:800;'>{ars(r['calc'])}</td>"
+            f"<td class='num' style='color:#2563eb; font-weight:700;'>{ars(r['calc_accum'])}</td>"
+            f"<td class='num' style='color:#7c3aed; font-weight:800;'>{liquid_profit_html}</td>"
+            f"<td class='num' style='color:#7c3aed; font-weight:700;'>{ars(r['liquid_profit_accum'])}</td>"
+            f"<td class='num' style='color:#16a34a; font-weight:800;'>{real_profit_html}</td>"
+            f"<td class='num' style='color:#16a34a; font-weight:700;'>{real_profit_accum_html}</td>"
+            f"<td class='num'>{desfasaje_html}</td>"
             "</tr>"
         )
 
-    head_html = "".join(_cmp_tr(r) for r in head_rows) if head_rows else "<tr><td colspan='10' class='muted'>Sin datos</td></tr>"
-    tail_html = "".join(_cmp_tr(r) for r in tail_rows)
+    head_html = (
+        "".join(_cmp_tr(r) for r in rows_with_data)
+        if rows_with_data
+        else "<tr><td colspan='8' class='muted'>Sin datos</td></tr>"
+    )
 
     details_html = ""
-    if tail_rows:
-        details_html = f"""
-        <details>
-          <summary>Ver más días</summary>
-          <div style="height:10px;"></div>
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th class="num">Ganancia calculada</th>
-                <th style="text-align:center;">Ganancia Efectivo</th>
-                <th style="text-align:center;">Ganancia Digital</th>
-                <th style="text-align:center;">Apps pendientes</th>
-                <th style="text-align:center;">Apps cobradas</th>
-                <th style="text-align:center;"></th>
-                <th class="num">Ganancia Real Total</th>
-                <th class="num">Real + Apps</th>
-                <th class="num">Desfasaje final</th>
-              </tr>
-            </thead>
-            <tbody>{tail_html}</tbody>
-          </table>
-        </details>
-        """
 
     body = f"""
     <h1>Panel Central</h1>
@@ -447,11 +509,13 @@ def dashboard_finanzas():
         <div class="value">{ars(profit)}</div>
       </div>
 
-      <div class="card kpi profit">
-        <div class="label">Ganancia real (acumulada)</div>
-        <div class="value">{ars(real_accum)}</div>
-        <div class="muted">Suma efectivo + digital cargado</div>
+      
+<div class="card kpi blue">
+        <div class="label">Ganancia Calculada Acumulada</div>
+        <div class="value">{ars(cmp_calc_accum[-1] if cmp_calc_accum else 0.0)}</div>
+        <div class="muted">Acumulado del período</div>
       </div>
+
 
       <div class="card kpi">
         <div class="margen-kpi">
@@ -470,9 +534,10 @@ def dashboard_finanzas():
         </div>
       </div>
 
-      <div class="card kpi">
-        <div class="label">Promedio diario (Ingresos)</div>
-        <div class="value">{ars(promedio_diario)}</div>
+      <div class="card kpi profit">
+        <div class="label">Ganancia Líquida Acumulada</div>
+        <div class="value">{ars(cmp_liquid_profit_accum[-1] if cmp_liquid_profit_accum else 0.0)}</div>
+        <div class="muted">Liquidez diaria - gastos</div>
       </div>
 
       <div class="card kpi">
@@ -481,11 +546,17 @@ def dashboard_finanzas():
         <div class="muted">Gasto fijo en el rango</div>
       </div>
 
-      <div class="card kpi profit">
-        <div class="label">Ganancia Real Final</div>
-        <div class="value">{ars(real_fina_accum)}</div>
-        <div class="muted">Efectivo + digital + apps pendientes</div>
+      
+<div class="card kpi income">
+        <div class="label">Ganancia Real Acumulada</div>
+        <div class="value">{ars(
+        rows_with_data[0]["real_profit_accum"]
+        if rows_with_data and rows_with_data[0]["real_profit_accum"] is not None
+        else 0.0
+    )}</div>
+        <div class="muted">Liquidez real cargada</div>
       </div>
+
     </div>
 
     <div class="grid">
@@ -518,10 +589,10 @@ def dashboard_finanzas():
     </div>
 
     <div class="card" id="profit-control">
-      <h3>Bloque 5 · Control de Ganancia Calculada vs Real (últimos 5 días visibles)</h3>
+      <h3>Bloque 5 · Control: Ganancia Calculada, Líquida y Real</h3>
       <div class="chartbox"><canvas id="profitCompareChart"></canvas></div>
       <p class="muted" style="margin-top:10px;">
-        Azul = calculada. Rojo = real (efectivo + digital). Verde = real + apps. Las líneas acumuladas mantienen el mismo color y se muestran interlineadas.
+        Azul = ganancia calculada (ventas - gastos). Violeta = ganancia líquida (liquidez diaria - gastos). Verde = ganancia real cargada manualmente. Las líneas sólidas muestran valores diarios y las punteadas muestran acumulados del mismo color.
       </p>
 
       <div style="height:10px;"></div>
@@ -530,21 +601,18 @@ def dashboard_finanzas():
         <thead>
           <tr>
             <th>Fecha</th>
-            <th class="num">Ganancia calculada</th>
-            <th style="text-align:center;">Ganancia Efectivo</th>
-            <th style="text-align:center;">Ganancia Digital</th>
-            <th style="text-align:center;">Apps pendientes</th>
-            <th style="text-align:center;">Apps cobradas</th>
-            <th style="text-align:center;"></th>
-            <th class="num">Ganancia Real Total</th>
-            <th class="num">Real + Apps</th>
-            <th class="num">Desfasaje final</th>
+            <th class="num">Calculada</th>
+            <th class="num">Calc.<br>Acum.</th>
+            <th class="num">Líquida</th>
+            <th class="num">Líq.<br>Acum.</th>
+            <th class="num">Real</th>
+            <th class="num">Real<br>Acum.</th>
+            <th class="num">Desf.<br>%</th>
           </tr>
         </thead>
         <tbody>{head_html}</tbody>
       </table>
 
-      {details_html}
     </div>
 
     <script>
@@ -639,49 +707,53 @@ def dashboard_finanzas():
 
       const pc = document.getElementById("profitCompareChart");
       if (pc) {{
+        const colorCalc = '#2563eb';
+        const colorLiquidProfit = '#7c3aed';
+        const colorRealProfit = '#16a34a';
+
         profitCompareChartInstance = new Chart(pc, {{
           type: 'line',
           data: {{
             labels: profitCmp.labels,
             datasets: [
               {{
-                label: 'Ganancia Calculada',
+                label: 'Ganancia Calculada (diaria)',
                 data: profitCmp.calc,
                 tension: 0.25,
                 fill: false,
                 borderWidth: 2,
                 pointRadius: 3,
                 spanGaps: false,
-                borderColor: '#2563eb',
-                backgroundColor: '#2563eb',
-                pointBackgroundColor: '#2563eb'
+                borderColor: colorCalc,
+                backgroundColor: colorCalc,
+                pointBackgroundColor: colorCalc
               }},
               {{
-                label: 'Ganancia Real',
-                data: profitCmp.real,
+                label: 'Ganancia Líquida (diaria)',
+                data: profitCmp.liquid_profit,
                 tension: 0.25,
                 fill: false,
                 borderWidth: 2,
                 pointRadius: 3,
                 spanGaps: false,
-                borderColor: '#dc2626',
-                backgroundColor: '#dc2626',
-                pointBackgroundColor: '#dc2626'
+                borderColor: colorLiquidProfit,
+                backgroundColor: colorLiquidProfit,
+                pointBackgroundColor: colorLiquidProfit
               }},
               {{
-                label: 'Ganancia Real + Apps',
-                data: profitCmp.explained,
+                label: 'Ganancia Real (diaria)',
+                data: profitCmp.real_profit,
                 tension: 0.25,
                 fill: false,
                 borderWidth: 2,
                 pointRadius: 3,
                 spanGaps: false,
-                borderColor: '#16a34a',
-                backgroundColor: '#16a34a',
-                pointBackgroundColor: '#16a34a'
+                borderColor: colorRealProfit,
+                backgroundColor: colorRealProfit,
+                pointBackgroundColor: colorRealProfit
               }},
               {{
-                label: 'Calculada Acumulada',
+                label: 'Ganancia Calculada Acumulada',
                 data: profitCmp.calc_accum,
                 tension: 0.2,
                 fill: false,
@@ -689,35 +761,35 @@ def dashboard_finanzas():
                 pointRadius: 2,
                 borderDash: [6, 4],
                 spanGaps: false,
-                borderColor: '#2563eb',
-                backgroundColor: '#2563eb',
-                pointBackgroundColor: '#2563eb'
+                borderColor: colorCalc,
+                backgroundColor: colorCalc,
+                pointBackgroundColor: colorCalc
               }},
               {{
-                label: 'Real Acumulada',
-                data: profitCmp.real_accum,
+                label: 'Ganancia Líquida Acumulada',
+                data: profitCmp.liquid_profit_accum,
                 tension: 0.2,
                 fill: false,
                 borderWidth: 2,
                 pointRadius: 2,
                 borderDash: [6, 4],
                 spanGaps: false,
-                borderColor: '#dc2626',
-                backgroundColor: '#dc2626',
-                pointBackgroundColor: '#dc2626'
+                borderColor: colorLiquidProfit,
+                backgroundColor: colorLiquidProfit,
+                pointBackgroundColor: colorLiquidProfit
               }},
               {{
-                label: 'Real + Apps Acumulada',
-                data: profitCmp.explained_accum,
+                label: 'Ganancia Real Acumulada',
+                data: profitCmp.real_profit_accum,
                 tension: 0.2,
                 fill: false,
                 borderWidth: 2,
                 pointRadius: 2,
                 borderDash: [6, 4],
                 spanGaps: false,
-                borderColor: '#16a34a',
-                backgroundColor: '#16a34a',
-                pointBackgroundColor: '#16a34a'
+                borderColor: colorRealProfit,
+                backgroundColor: colorRealProfit,
+                pointBackgroundColor: colorRealProfit
               }}
             ]
           }},
@@ -746,62 +818,6 @@ def dashboard_finanzas():
         }});
       }}
 
-      function recomputeAccum(arr){{
-        let run = 0;
-        return arr.map(v => {{
-          if (v !== null && v !== undefined && !Number.isNaN(v)) run += Number(v);
-          return run;
-        }});
-      }}
-
-      async function postRealProfit(form) {{
-        const fd = new FormData(form);
-        const res = await fetch('/finanzas/real_profit/save_json', {{
-          method: 'POST',
-          body: fd
-        }});
-        const data = await res.json();
-        if (!data.ok) {{
-          alert(data.error || "Error guardando ganancia real");
-          return;
-        }}
-
-        const tr = form.closest('tr');
-        if (tr) {{
-          const totalCell = tr.querySelector('.totalCell');
-          if (totalCell) totalCell.innerHTML = data.total_html;
-
-          const explainedCell = tr.querySelector('.explainedCell');
-          if (explainedCell) explainedCell.innerHTML = data.explained_html;
-
-          const desfasajeCell = tr.querySelector('.desfasajeCell');
-          if (desfasajeCell) desfasajeCell.innerHTML = data.desfasaje_html;
-        }}
-
-        const idx = profitCmp.dates.indexOf(data.day);
-        if (idx >= 0) {{
-          profitCmp.real[idx] = data.real_total_value;
-          profitCmp.explained[idx] = data.explained_total_value;
-
-          profitCmp.real_accum = recomputeAccum(profitCmp.real);
-          profitCmp.explained_accum = recomputeAccum(profitCmp.explained);
-
-          if (profitCompareChartInstance) {{
-            profitCompareChartInstance.data.datasets[1].data = profitCmp.real;
-            profitCompareChartInstance.data.datasets[2].data = profitCmp.explained;
-            profitCompareChartInstance.data.datasets[4].data = profitCmp.real_accum;
-            profitCompareChartInstance.data.datasets[5].data = profitCmp.explained_accum;
-            profitCompareChartInstance.update();
-          }}
-        }}
-      }}
-
-      document.querySelectorAll('.realProfitForm').forEach((form) => {{
-        form.addEventListener('submit', function(ev) {{
-          ev.preventDefault();
-          postRealProfit(form);
-        }});
-      }});
     </script>
     """
     db.session.commit()

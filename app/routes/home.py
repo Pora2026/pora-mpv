@@ -36,9 +36,9 @@ def home():
       </div>
 
       <div class="card">
-        <h3>Export / Backup</h3>
-        <p class="muted">Exportar a Excel o JSON para resguardar datos.</p>
-        <a class="btn primary" href="/export">Entrar</a>
+        <h3>Backup completo</h3>
+        <p class="muted">Descargar un respaldo completo y versionado de todos los datos.</p>
+        <a class="btn primary" href="/backup">Entrar</a>
       </div>
     </div>
     """

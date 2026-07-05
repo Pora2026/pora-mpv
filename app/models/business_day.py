@@ -11,19 +11,66 @@ class BusinessDay(db.Model):
     status = db.Column(db.String(20), default="draft")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Legacy
+    # =========================================================
+    # LEGACY
+    # =========================================================
+
     real_profit = db.Column(db.Float, nullable=True)
 
-    # Ganancia real por canal
+    # =========================================================
+    # GANANCIA REAL POR CANAL
+    # =========================================================
+
     real_cash_profit = db.Column(db.Float, nullable=True)
     real_digital_profit = db.Column(db.Float, nullable=True)
 
-    # Apps
-    real_apps_pending = db.Column(db.Float, nullable=True)     # lo vendido
-    real_apps_collected = db.Column(db.Float, nullable=True)   # lo cobrado (NUEVO)
+    # =========================================================
+    # APPS
+    # =========================================================
 
-    # Caja real
-    cash_balance = db.Column(db.Float, nullable=True)          # lo que contás (NUEVO)
+    real_apps_pending = db.Column(db.Float, nullable=True)      # vendido
+    real_apps_collected = db.Column(db.Float, nullable=True)    # cobrado
 
-    shifts = db.relationship("ShiftRecord", backref="business_day", cascade="all, delete-orphan")
-    expenses = db.relationship("ExpenseEntry", backref="business_day", cascade="all, delete-orphan")
+    # =========================================================
+    # CAJA / LIQUIDEZ
+    # =========================================================
+
+    # saldo inicial del día
+    opening_cash_balance = db.Column(db.Float, nullable=True)
+
+    # saldo esperado según sistema
+    expected_cash_balance = db.Column(db.Float, nullable=True)
+
+    # arqueo físico real
+    actual_cash_balance = db.Column(db.Float, nullable=True)
+
+    # diferencia entre esperado y real
+    cash_difference = db.Column(db.Float, nullable=True)
+
+    # transferencia a caja fuerte
+    safe_box_transfer = db.Column(db.Float, nullable=True)
+    
+    # liquidez diaria consolidada
+    daily_mercadopago = db.Column(db.Float, nullable=True)
+
+    # efectivo retirado desde CAJA
+    daily_cash_withdrawn = db.Column(db.Float, nullable=True)
+
+    # legacy anterior
+    cash_balance = db.Column(db.Float, nullable=True)
+
+    # =========================================================
+    # RELACIONES
+    # =========================================================
+
+    shifts = db.relationship(
+        "ShiftRecord",
+        backref="business_day",
+        cascade="all, delete-orphan"
+    )
+
+    expenses = db.relationship(
+        "ExpenseEntry",
+        backref="business_day",
+        cascade="all, delete-orphan"
+    )
