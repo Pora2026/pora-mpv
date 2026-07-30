@@ -1,11 +1,16 @@
 from datetime import date
 import json
+from datetime import timedelta
 
 from flask import Blueprint, request, jsonify
 from flask_login import login_required
 from sqlalchemy import func
-from app.services.finance_service import compute_explained_total, compute_real_total, compute_pending_net
-from app.services.accumulator_service import Accumulator
+from app.services.finance_service import (
+    compute_explained_total,
+    compute_expected_cash_balance,
+    compute_comparable_liquid_balance,
+    compute_reserved_funds_series,
+)
 
 from app.extensions import db
 from app.models import BusinessDay, ExpenseCategory, ExpenseEntry
@@ -21,6 +26,10 @@ from app.utils.dates import (
 )
 
 dashboard_bp = Blueprint("dashboard_bp", __name__)
+
+# Factor de retención de apps (comisiones + impuestos + cargos)
+# Basado en liquidación: 582.237,50 brutos → 341.039,27 netos = 41,4% retención
+APPS_RETENTION_FACTOR = 0.414
 
 
 def _render_page(*args, **kwargs):
@@ -252,22 +261,36 @@ def dashboard_finanzas():
     )
     bmap = {b.day: b for b in bdays}
 
-    # KPI existente: se mantiene la lectura de liquidez real cargada en los días.
-    liquidez_real_acumulada = sum(
-        float(getattr(b, "actual_cash_balance", 0.0) or 0.0)
-        for b in bdays
-    )
+    # =========================================================
+    # COBRO POR APPS (próximo viernes)
+    # =========================================================
+    def next_friday(d):
+        days_ahead = 4 - d.weekday()
+        if days_ahead <= 0:
+            days_ahead += 7
+        return d + timedelta(days=days_ahead)
 
-    # KPI existente de ganancia real: se conserva para no tocar el bloque superior.
-    real_accum = 0.0
-    real_fina_accum = 0.0
-    for b in bdays:
-        cash, digital, apps, apps_collected, total, explained_total = _real_parts(b)
-        explained_total = compute_explained_total(cash, digital, apps, apps_collected)
-        if total is not None:
-            real_accum += float(total or 0.0)
-        if explained_total is not None:
-            real_fina_accum += float(explained_total or 0.0)
+    def prev_monday(d):
+        days_back = d.weekday()
+        return d - timedelta(days=days_back)
+
+    proximo_viernes = next_friday(today)
+    lunes_cobro = prev_monday(proximo_viernes - timedelta(days=14))
+    sabado_cobro = lunes_cobro + timedelta(days=6)
+
+    apps_a_cobrar_bruto = 0.0
+    days_in_range = []
+    cur = lunes_cobro
+    while cur <= sabado_cobro:
+        if not is_sunday(cur):
+            days_in_range.append(cur)
+            b = bmap.get(cur)
+            if b:
+                apps_a_cobrar_bruto += float(getattr(b, "real_apps_pending", 0.0) or 0.0)
+        cur += timedelta(days=1)
+
+    apps_a_cobrar_estimado = apps_a_cobrar_bruto * (1 - APPS_RETENTION_FACTOR)
+    periodo_cobro_str = f"{fmt_date_ar(lunes_cobro)} al {fmt_date_ar(sabado_cobro)}"
 
     cmp_rows = []
     cmp_dates = []
@@ -280,30 +303,54 @@ def dashboard_finanzas():
     cmp_calc_accum = []
     cmp_liquid_profit_accum = []
     cmp_real_profit_accum = []
+    cmp_reserved_funds = []
 
-    # Cada acumulado mantiene su propia lógica.
-    # Tomar el saldo inicial del primer día hábil del período.
-    saldo_inicial_periodo = 0.0
-    for _b in bdays:
-        if getattr(_b, "opening_cash_balance", None) is not None:
-            saldo_inicial_periodo = float(getattr(_b, "opening_cash_balance", 0.0) or 0.0)
-            break
+    # Para que un filtro iniciado a mitad de mes conserve los acumulados
+    # correctos, calculamos internamente desde el primer día del mes inicial.
+    chart_start = d1.replace(day=1)
+    chart_days = list(iter_workdays(chart_start, d2))
+    chart_bdays = (
+        BusinessDay.query
+        .filter(BusinessDay.day >= chart_start, BusinessDay.day <= d2)
+        .order_by(BusinessDay.day.asc())
+        .all()
+    )
+    chart_bmap = {b.day: b for b in chart_bdays}
 
-    calc_running = None
-    liquid_profit_running = None
+    opening_reserved_by_month = {}
+    for b in chart_bdays:
+        month_key = (b.day.year, b.day.month)
+        if month_key not in opening_reserved_by_month:
+            opening_reserved_by_month[month_key] = float(
+                getattr(b, "opening_cash_balance", 0.0) or 0.0
+            )
 
-    for d in all_days:
-        b = bmap.get(d)
+    current_month_key = None
+    opening_reserved_funds = 0.0
+    calc_running = 0.0
+    liquid_profit_running = 0.0
+    reserve_movements = []
+
+    for d in chart_days:
+        month_key = (d.year, d.month)
+        if month_key != current_month_key:
+            current_month_key = month_key
+            opening_reserved_funds = float(
+                opening_reserved_by_month.get(month_key, 0.0) or 0.0
+            )
+            calc_running = 0.0
+            liquid_profit_running = 0.0
+            reserve_movements = []
+
+        b = chart_bmap.get(d)
 
         if b:
             ensure_shifts(b)
             recalc_day_status(b)
             t = day_totals(b)
 
-            # Ganancia calculada = ventas - gastos.
             calc = float(t["profit"] or 0.0)
 
-            # Ganancia líquida = liquidez diaria - gasto total.
             daily_liquidity = (
                 float(getattr(b, "daily_mercadopago", 0.0) or 0.0)
                 + float(getattr(b, "daily_cash_withdrawn", 0.0) or 0.0)
@@ -322,43 +369,84 @@ def dashboard_finanzas():
                 else None
             )
 
-            # Ganancia real diaria:
-            # ganancia en efectivo + ganancia digital, ambos cargados manualmente.
+            if has_liquid_data:
+                expected_total_balance = compute_expected_cash_balance(
+                    opening_balance=getattr(b, "opening_cash_balance", None),
+                    cash_income=daily_liquidity,
+                    paid_expenses=t["expense_total"],
+                    safe_box_transfer=getattr(b, "safe_box_transfer", None),
+                )
+            elif getattr(b, "expected_cash_balance", None) is not None:
+                expected_total_balance = float(b.expected_cash_balance)
+            else:
+                expected_total_balance = None
+
+            reserve_addition = max(
+                float(getattr(b, "safe_box_transfer", 0.0) or 0.0),
+                0.0,
+            )
+
             has_real_data = (
                 getattr(b, "real_cash_profit", None) is not None
                 or getattr(b, "real_digital_profit", None) is not None
+                or getattr(b, "real_apps_collected", None) is not None
             )
 
             real_profit = (
                 float(getattr(b, "real_cash_profit", 0.0) or 0.0)
                 + float(getattr(b, "real_digital_profit", 0.0) or 0.0)
+                + float(getattr(b, "real_apps_collected", 0.0) or 0.0)
                 if has_real_data
                 else None
             )
 
-            # Ganancia real acumulada:
-            # liquidez real cargada manualmente.
-            real_profit_accum = (
-                float(getattr(b, "actual_cash_balance", 0.0) or 0.0)
-                if getattr(b, "actual_cash_balance", None) is not None
-                else None
-            )
         else:
             calc = 0.0
             liquid_profit = None
+            expected_total_balance = None
+            reserve_addition = 0.0
             real_profit = None
             real_profit_accum = None
 
-        if calc_running is None:
-            calc_running = saldo_inicial_periodo + float(calc or 0.0)
-        else:
-            calc_running += float(calc or 0.0)
+        calc_running += float(calc or 0.0)
 
-        if liquid_profit is not None:
-            if liquid_profit_running is None:
-                liquid_profit_running = saldo_inicial_periodo + float(liquid_profit or 0.0)
-            else:
-                liquid_profit_running += float(liquid_profit or 0.0)
+        actual_balance = (
+            getattr(b, "actual_cash_balance", None)
+            if b is not None
+            else None
+        )
+
+        reserve_movements.append(
+            {
+                "net_liquidity": float(liquid_profit or 0.0)
+                if liquid_profit is not None
+                else 0.0,
+                "reserve_addition": reserve_addition,
+                "actual_balance": actual_balance,
+            }
+        )
+        reserve_state = compute_reserved_funds_series(
+            opening_reserved_funds,
+            reserve_movements,
+        )[-1]
+        reserved_funds_available = reserve_state["reserve_available"]
+
+        if expected_total_balance is not None:
+            liquid_profit_running = compute_comparable_liquid_balance(
+                expected_total_balance,
+                reserved_funds_available,
+            )
+
+        real_profit_accum = (
+            reserve_state["real_month_available"]
+            if actual_balance is not None
+            else None
+        )
+
+        # Los días anteriores al filtro solo sirven para reconstruir el
+        # acumulado mensual; no se muestran en la tabla ni en el gráfico.
+        if d < d1:
+            continue
 
         cmp_rows.append(
             {
@@ -371,6 +459,7 @@ def dashboard_finanzas():
                 "liquid_profit_accum": liquid_profit_running,
                 "real_profit": real_profit,
                 "real_profit_accum": real_profit_accum,
+                "reserved_funds_available": reserved_funds_available,
             }
         )
 
@@ -378,14 +467,28 @@ def dashboard_finanzas():
         cmp_labels.append(fmt_date_ar(d))
 
         cmp_calc.append(round(calc, 2))
-        cmp_liquid_profit.append(None if liquid_profit is None else round(float(liquid_profit), 2))
-        cmp_real_profit.append(None if real_profit is None else round(float(real_profit), 2))
+        cmp_liquid_profit.append(
+            None if liquid_profit is None else round(float(liquid_profit), 2)
+        )
+        cmp_real_profit.append(
+            None if real_profit is None else round(float(real_profit), 2)
+        )
 
         cmp_calc_accum.append(round(calc_running, 2))
-        cmp_liquid_profit_accum.append(
-            None if liquid_profit_running is None else round(liquid_profit_running, 2)
+        cmp_liquid_profit_accum.append(round(liquid_profit_running, 2))
+        cmp_real_profit_accum.append(
+            None if real_profit_accum is None else round(float(real_profit_accum), 2)
         )
-        cmp_real_profit_accum.append(None if real_profit_accum is None else round(float(real_profit_accum), 2))
+        cmp_reserved_funds.append(round(reserved_funds_available, 2))
+
+    # Los KPI toman el último valor mensual disponible dentro del filtro.
+    latest_real_accum = next(
+        (value for value in reversed(cmp_real_profit_accum) if value is not None),
+        None,
+    )
+    latest_reserved_funds = (
+        cmp_reserved_funds[-1] if cmp_reserved_funds else 0.0
+    )
 
     cmp_payload = {
         "dates": cmp_dates,
@@ -412,9 +515,8 @@ def dashboard_finanzas():
         if _row_has_data(r)
     ]
 
-    # Mostrar únicamente días con datos, del más reciente al más antiguo.
     rows_with_data.sort(key=lambda r: r["date"], reverse=True)
-    
+
     def _fmt_or_dash(value):
         if value is None:
             return "<span class='muted'>—</span>"
@@ -505,17 +607,16 @@ def dashboard_finanzas():
       </div>
 
       <div class="card kpi profit">
-        <div class="label">Ganancia</div>
-        <div class="value">{ars(profit)}</div>
+        <div class="label">Ganancia Líquida Acumulada</div>
+        <div class="value">{ars(cmp_liquid_profit_accum[-1] if cmp_liquid_profit_accum else 0.0)}</div>
+        <div class="muted">Saldo esperado al cierre menos fondos reservados disponibles</div>
       </div>
 
-      
-<div class="card kpi blue">
+      <div class="card kpi blue">
         <div class="label">Ganancia Calculada Acumulada</div>
         <div class="value">{ars(cmp_calc_accum[-1] if cmp_calc_accum else 0.0)}</div>
-        <div class="muted">Acumulado del período</div>
+        <div class="muted">Acumulado del mes</div>
       </div>
-
 
       <div class="card kpi">
         <div class="margen-kpi">
@@ -534,10 +635,10 @@ def dashboard_finanzas():
         </div>
       </div>
 
-      <div class="card kpi profit">
-        <div class="label">Ganancia Líquida Acumulada</div>
-        <div class="value">{ars(cmp_liquid_profit_accum[-1] if cmp_liquid_profit_accum else 0.0)}</div>
-        <div class="muted">Liquidez diaria - gastos</div>
+      <div class="card kpi">
+        <div class="label">Cobro por Apps (próximo viernes)</div>
+        <div class="value">{ars(apps_a_cobrar_estimado)}</div>
+        <div class="muted">período: {periodo_cobro_str}</div>
       </div>
 
       <div class="card kpi">
@@ -546,15 +647,16 @@ def dashboard_finanzas():
         <div class="muted">Gasto fijo en el rango</div>
       </div>
 
-      
-<div class="card kpi income">
-        <div class="label">Ganancia Real Acumulada</div>
-        <div class="value">{ars(
-        rows_with_data[0]["real_profit_accum"]
-        if rows_with_data and rows_with_data[0]["real_profit_accum"] is not None
-        else 0.0
-    )}</div>
-        <div class="muted">Liquidez real cargada</div>
+      <div class="card kpi income">
+        <div class="label">Liquidez Real Atribuible al Mes</div>
+        <div class="value">{ars(latest_real_accum) if latest_real_accum is not None else "—"}</div>
+        <div class="muted">Liquidez real total descontando solo la reserva aún disponible</div>
+      </div>
+
+      <div class="card kpi">
+        <div class="label">Fondos reservados disponibles</div>
+        <div class="value">{ars(latest_reserved_funds)}</div>
+        <div class="muted">Saldo anterior + agregados - consumos</div>
       </div>
 
     </div>
@@ -592,7 +694,7 @@ def dashboard_finanzas():
       <h3>Bloque 5 · Control: Ganancia Calculada, Líquida y Real</h3>
       <div class="chartbox"><canvas id="profitCompareChart"></canvas></div>
       <p class="muted" style="margin-top:10px;">
-        Azul = ganancia calculada (ventas - gastos). Violeta = ganancia líquida (liquidez diaria - gastos). Verde = ganancia real cargada manualmente. Las líneas sólidas muestran valores diarios y las punteadas muestran acumulados del mismo color.
+        Azul = ganancia calculada (ventas - gastos). Violeta sólido = ganancia líquida diaria. Violeta punteado = saldo esperado al cierre descontando solo la reserva aún disponible. Verde sólido = ganancia real cargada manualmente. Verde punteado = liquidez real atribuible al mes.
       </p>
 
       <div style="height:10px;"></div>
@@ -766,7 +868,7 @@ def dashboard_finanzas():
                 pointBackgroundColor: colorCalc
               }},
               {{
-                label: 'Ganancia Líquida Acumulada',
+                label: 'Liquidez Esperada Comparable',
                 data: profitCmp.liquid_profit_accum,
                 tension: 0.2,
                 fill: false,
@@ -779,7 +881,7 @@ def dashboard_finanzas():
                 pointBackgroundColor: colorLiquidProfit
               }},
               {{
-                label: 'Ganancia Real Acumulada',
+                label: 'Liquidez Real del Mes',
                 data: profitCmp.real_profit_accum,
                 tension: 0.2,
                 fill: false,
