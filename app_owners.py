@@ -25,6 +25,10 @@ from app.extensions import db, login_manager
 from app.models import User, BusinessDay, ShiftRecord, ExpenseCategory, ExpenseEntry
 
 from app.utils.money import safe_float, ars
+from app.services.finance_service import (
+    compute_adjusted_profit,
+    compute_apps_retention_estimate,
+)
 from app.utils.dates import (
     is_sunday,
     parse_ymd,
@@ -83,22 +87,39 @@ def day_totals(bday: BusinessDay) -> dict:
         fix_exp = sum(s.fixed_expense_total or 0 for s in bday.shifts)
 
     exp_total = var_exp + fix_exp
-    profit = income - exp_total
+    profit_raw = income - exp_total
+
+    apps_gross = float(getattr(bday, "real_apps_pending", 0.0) or 0.0)
+    apps_retention_estimate = compute_apps_retention_estimate(apps_gross)
+    profit_adjusted = compute_adjusted_profit(
+        total_sales=income,
+        paid_expenses=exp_total,
+        apps_gross=apps_gross,
+    )
+
     return {
         "income": float(income),
         "variable_expense": float(var_exp),
         "fixed_expense": float(fix_exp),
         "expense_total": float(exp_total),
-        "profit": float(profit),
+
+        # Compatibilidad: ``profit`` conserva la fórmula histórica.
+        "profit": float(profit_raw),
+        "profit_raw": float(profit_raw),
+
+        # Nueva ganancia calculada ajustada por el costo estimado de apps.
+        "apps_gross": float(apps_gross),
+        "apps_retention_estimate": float(apps_retention_estimate),
+        "profit_adjusted": float(profit_adjusted),
     }
 
 
 def margin_bucket(margin_pct):
     if margin_pct is None:
         return ("—", "pill")
-    if margin_pct <= 20:
+    if margin_pct <= 10:
         return ("Malo", "pill bad")
-    if margin_pct <= 30:
+    if margin_pct < 20:
         return ("Regular", "pill warn")
     return ("Bueno", "pill ok")
 
@@ -308,6 +329,7 @@ def range_series(d1: date, d2: date):
         db.session.query(
             BusinessDay.day.label("day"),
             func.coalesce(sh_sub.c.income, 0.0).label("income"),
+            func.coalesce(BusinessDay.real_apps_pending, 0.0).label("apps_pending"),
             case(
                 (func.coalesce(exp_sub.c.cnt, 0) > 0, exp_sub.c.var_cat),
                 else_=func.coalesce(sh_sub.c.var_sh, 0.0),
@@ -332,7 +354,14 @@ def range_series(d1: date, d2: date):
         var_exp = float(r.var_exp or 0)
         fix_exp = float(r.fix_exp or 0)
         exp_total = var_exp + fix_exp
-        profit = income - exp_total
+        profit_raw = income - exp_total
+        apps_gross = float(r.apps_pending or 0.0)
+        apps_retention_estimate = compute_apps_retention_estimate(apps_gross)
+        profit_adjusted = compute_adjusted_profit(
+            total_sales=income,
+            paid_expenses=exp_total,
+            apps_gross=apps_gross,
+        )
         out.append(
             {
                 "date": r.day.isoformat(),
@@ -340,7 +369,14 @@ def range_series(d1: date, d2: date):
                 "variable_expense": var_exp,
                 "fixed_expense": fix_exp,
                 "expense_total": exp_total,
-                "profit": profit,
+
+                # Compatibilidad con consumidores históricos.
+                "profit": profit_raw,
+                "profit_raw": profit_raw,
+
+                "apps_gross": apps_gross,
+                "apps_retention_estimate": apps_retention_estimate,
+                "profit_adjusted": profit_adjusted,
             }
         )
     return out
@@ -529,7 +565,24 @@ BASE_HTML = """
     .row-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
     .row-actions .field { flex: 1; min-width: 200px; }
     .chartbox { position: relative; height: 320px; }
-    @media (max-width: 640px){ .chartbox{ height: 280px; } }
+    .monthly-chartbox { height: 430px; }
+
+    .ranking-section{ margin-top: 12px; }
+    .ranking-section + .ranking-section{
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .ranking-section h4{
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    @media (max-width: 640px){
+      .chartbox{ height: 280px; }
+      .monthly-chartbox{ height: 360px; }
+    }
 
     .neg { color: var(--red); font-weight: 800; }
     .inline { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }

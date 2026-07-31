@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify
 from flask_login import login_required
 from sqlalchemy import func
 from app.services.finance_service import (
+    APPS_RETENTION_FACTOR,
     compute_explained_total,
     compute_expected_cash_balance,
     compute_comparable_liquid_balance,
@@ -26,11 +27,6 @@ from app.utils.dates import (
 )
 
 dashboard_bp = Blueprint("dashboard_bp", __name__)
-
-# Factor de retención de apps (comisiones + impuestos + cargos)
-# Basado en liquidación: 582.237,50 brutos → 341.039,27 netos = 41,4% retención
-APPS_RETENTION_FACTOR = 0.414
-
 
 def _render_page(*args, **kwargs):
     from app_owners import render_page
@@ -142,7 +138,12 @@ def dashboard_finanzas():
 
     income = sum(x["income"] for x in series)
     expense = sum(x["expense_total"] for x in series)
-    profit = income - expense
+    apps_retention_estimate = sum(
+        x.get("apps_retention_estimate", 0.0)
+        for x in series
+    )
+    profit_raw = sum(x.get("profit_raw", x["profit"]) for x in series)
+    profit = sum(x.get("profit_adjusted", x["profit"]) for x in series)
 
     margen_periodo = (profit / income * 100.0) if income else None
 
@@ -184,7 +185,7 @@ def dashboard_finanzas():
     for x in series:
         day_income = x["income"]
         day_exp = x["expense_total"]
-        day_profit = x["profit"]
+        day_profit = x.get("profit_adjusted", x["profit"])
         m = (day_profit / day_income * 100.0) if day_income else None
         ranked.append(
             {
@@ -224,12 +225,6 @@ def dashboard_finanzas():
     best_html = rank_rows(best3, positive_highlight=True)
     worst_html = rank_rows(worst3)
 
-    if income > 0:
-        pie_labels = ["Ingresos", "Gastos", "Ganancia"] if profit >= 0 else ["Ingresos", "Gastos", "Pérdida"]
-        pie_values = [max(income, 0), max(expense, 0), max(profit, 0) if profit >= 0 else abs(profit)]
-    else:
-        pie_labels = ["Ingresos", "Gastos", "Ganancia"]
-        pie_values = [0, 0, 0]
 
     # =========================================================
     # ANÁLISIS MENSUAL DE LIQUIDEZ DEL AÑO SELECCIONADO
@@ -400,39 +395,6 @@ def dashboard_finanzas():
         f"<td class='num'>{_monthly_table_value(monthly_liquid_profit[i])}</td>"
         for i in visible_month_indexes
     )
-    charts_payload = {
-        "pie": {
-            "labels": pie_labels,
-            "values": pie_values,
-        },
-        "monthly": {
-            "year": analysis_year,
-            "labels": month_labels,
-            "income": [
-                round(monthly_liquid_income[i], 2)
-                if monthly_liquid_days[i] > 0
-                else None
-                for i in visible_month_indexes
-            ],
-            "expense": [
-                round(monthly_liquid_expense[i], 2)
-                if monthly_liquid_days[i] > 0
-                else None
-                for i in visible_month_indexes
-            ],
-            "profit": [
-                None
-                if monthly_liquid_profit[i] is None
-                else round(monthly_liquid_profit[i], 2)
-                for i in visible_month_indexes
-            ],
-            "margin_pct": [
-                None if value is None else round(value, 2)
-                for value in monthly_margin_pct
-            ],
-        },
-    }
-    charts_json = json.dumps(charts_payload, ensure_ascii=False)
 
     if missing_days:
         options_html = "".join(f"<option value='{iso(d)}'>{fmt_date_ar(d)}</option>" for d in missing_days)
@@ -543,7 +505,7 @@ def dashboard_finanzas():
             recalc_day_status(b)
             t = day_totals(b)
 
-            calc = float(t["profit"] or 0.0)
+            calc = float(t.get("profit_adjusted", t["profit"]) or 0.0)
 
             daily_liquidity = (
                 float(getattr(b, "daily_mercadopago", 0.0) or 0.0)
@@ -684,6 +646,59 @@ def dashboard_finanzas():
         cmp_reserved_funds[-1] if cmp_reserved_funds else 0.0
     )
 
+    # Torta del período: se mantiene separada de la ganancia calculada.
+    # Muestra exclusivamente las métricas de liquidez solicitadas.
+    liquid_profit_period = (
+        float(cmp_liquid_profit_accum[-1])
+        if cmp_liquid_profit_accum
+        else 0.0
+    )
+
+    pie_labels = [
+        "Ingresos líquidos",
+        "Gastos",
+        "Ganancia líquida" if liquid_profit_period >= 0 else "Pérdida líquida",
+    ]
+    pie_values = [
+        max(float(ingresos_liquidos_acumulados or 0.0), 0.0),
+        max(float(expense or 0.0), 0.0),
+        abs(liquid_profit_period),
+    ]
+
+    charts_payload = {
+        "pie": {
+            "labels": pie_labels,
+            "values": pie_values,
+        },
+        "monthly": {
+            "year": analysis_year,
+            "labels": month_labels,
+            "income": [
+                round(monthly_liquid_income[i], 2)
+                if monthly_liquid_days[i] > 0
+                else None
+                for i in visible_month_indexes
+            ],
+            "expense": [
+                round(monthly_liquid_expense[i], 2)
+                if monthly_liquid_days[i] > 0
+                else None
+                for i in visible_month_indexes
+            ],
+            "profit": [
+                None
+                if monthly_liquid_profit[i] is None
+                else round(monthly_liquid_profit[i], 2)
+                for i in visible_month_indexes
+            ],
+            "margin_pct": [
+                None if value is None else round(value, 2)
+                for value in monthly_margin_pct
+            ],
+        },
+    }
+    charts_json = json.dumps(charts_payload, ensure_ascii=False)
+
     cmp_payload = {
         "dates": cmp_dates,
         "labels": cmp_labels,
@@ -806,7 +821,10 @@ def dashboard_finanzas():
       <div class="card kpi blue">
         <div class="label">Ganancia calculada acumulada</div>
         <div class="value">{ars(cmp_calc_accum[-1] if cmp_calc_accum else 0.0)}</div>
-        <div class="muted">Ventas menos gastos</div>
+        <div class="muted">
+          Ventas menos gastos y menos {APPS_RETENTION_FACTOR * 100:.1f}% estimado
+          sobre ventas de PY + Rappi
+        </div>
       </div>
 
       <div class="card kpi" style="background:rgba(22,163,74,.17); border-color:rgba(22,163,74,.34);">
@@ -935,7 +953,7 @@ def dashboard_finanzas():
       <h3>Bloque 5 · Control: Ganancia Calculada, Líquida y Real</h3>
       <div class="chartbox"><canvas id="profitCompareChart"></canvas></div>
       <p class="muted" style="margin-top:10px;">
-        Azul = ganancia calculada (ventas - gastos). Violeta sólido = ganancia líquida diaria. Violeta punteado = saldo esperado al cierre descontando solo la reserva aún disponible. Verde sólido = ganancia real cargada manualmente. Verde punteado = liquidez real atribuible al mes.
+        Azul = ganancia calculada ajustada (ventas - gastos - retención estimada de apps). Violeta sólido = ganancia líquida diaria. Violeta punteado = saldo esperado al cierre descontando solo la reserva aún disponible. Verde sólido = ganancia real cargada manualmente. Verde punteado = liquidez real atribuible al mes.
       </p>
 
       <div style="height:10px;"></div>
@@ -1024,14 +1042,14 @@ def dashboard_finanzas():
               {{
                 data: payload.pie.values,
                 backgroundColor: [
-                  'rgba(22,163,74,0.28)',
+                  'rgba(22,163,74,0.22)',
                   'rgba(220,38,38,0.22)',
-                  'rgba(37,99,235,0.22)'
+                  'rgba(124,58,237,0.22)'
                 ],
                 borderColor: [
                   'rgba(22,163,74,0.55)',
                   'rgba(220,38,38,0.55)',
-                  'rgba(37,99,235,0.55)'
+                  'rgba(124,58,237,0.55)'
                 ],
                 borderWidth: 1
               }}
@@ -1290,7 +1308,7 @@ def dashboard_finanzas():
             labels: profitCmp.labels,
             datasets: [
               {{
-                label: 'Ganancia Calculada (diaria)',
+                label: 'Ganancia Calculada Ajustada (diaria)',
                 data: profitCmp.calc,
                 tension: 0.25,
                 fill: false,
@@ -1326,7 +1344,7 @@ def dashboard_finanzas():
                 pointBackgroundColor: colorRealProfit
               }},
               {{
-                label: 'Ganancia Calculada Acumulada',
+                label: 'Ganancia Calculada Ajustada Acumulada',
                 data: profitCmp.calc_accum,
                 tension: 0.2,
                 fill: false,
@@ -1447,7 +1465,7 @@ def save_real_profit_json():
     db.session.commit()
 
     t = day_totals(bday)
-    calc = float(t["profit"])
+    calc = float(t.get("profit_adjusted", t["profit"]))
     total_html = _total_html(calc, total)
 
     explained_total = compute_explained_total(cash, digital, apps, apps_collected)

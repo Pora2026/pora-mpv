@@ -88,9 +88,16 @@ def list_days():
         totals = day_totals(d)
 
         status_pill = "<span class='pill ok'>complete</span>" if d.status == "complete" else "<span class='pill warn'>draft</span>"
-        profit_cls = "neg" if totals["profit"] < 0 else ""
+        adjusted_profit = float(
+            totals.get("profit_adjusted", totals["profit"]) or 0.0
+        )
+        profit_cls = "neg" if adjusted_profit < 0 else ""
 
-        m = (totals["profit"] / totals["income"] * 100.0) if totals["income"] else None
+        m = (
+            adjusted_profit / totals["income"] * 100.0
+            if totals["income"]
+            else None
+        )
         mlabel, mclass = margin_bucket(m)
 
         trs += (
@@ -98,7 +105,7 @@ def list_days():
             f"<td><a href='/days/{d.day}'>{fmt_date_ar(d.day)}</a></td>"
             f"<td class='num'>{ars(totals['income'])}</td>"
             f"<td class='num'>{ars(totals['expense_total'])}</td>"
-            f"<td class='num {profit_cls}'>{ars(totals['profit'])}</td>"
+            f"<td class='num {profit_cls}'>{ars(adjusted_profit)}</td>"
             f"<td>{status_pill}</td>"
             f"<td><span class='{mclass}'>{mlabel}</span></td>"
             f"</tr>"
@@ -283,7 +290,7 @@ def edit_day(day):
             totales_periodo = day_totals(dia_periodo)
 
             ganancia_calculada_dia = float(
-                totales_periodo["profit"] or 0.0
+                totales_periodo.get("profit_adjusted", totales_periodo["profit"]) or 0.0
             )
 
             has_liquid_data_periodo = (
@@ -564,8 +571,12 @@ def edit_day(day):
       </div>       
       
       <div class="kpi blue" style="padding:14px;">
-        <div class="label">Ganancia (calculada)</div>
-        <div class="value">{ars(totals["profit"])}</div>
+        <div class="label">Ganancia calculada ajustada</div>
+        <div class="value">{ars(totals.get("profit_adjusted", totals["profit"]))}</div>
+        <div class="muted">
+          Descuenta {ars(totals.get("apps_retention_estimate", 0.0))}
+          estimados de comisiones, impuestos y cargos de apps
+        </div>
       </div>
 
     <div class="kpi blue" style="padding:14px;">
@@ -689,7 +700,7 @@ def save_day(day):
         )
     else:
         t = day_totals(bday)
-        bday.real_profit = float(t["profit"])
+        bday.real_profit = float(t.get("profit_adjusted", t["profit"]))
 
     # Primero persistimos los cambios del formulario para que los totales
     # se calculen con los ingresos y gastos vigentes.

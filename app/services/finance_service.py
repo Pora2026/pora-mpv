@@ -2,6 +2,49 @@
 
 
 # =========================================================
+# ESTIMACIÓN DE COSTOS DE APPS
+# =========================================================
+
+# Estimación provisional basada en la liquidación analizada:
+# $582.237,50 brutos -> $341.039,27 netos.
+# Se reemplazará más adelante por un promedio ponderado de varias liquidaciones.
+APPS_RETENTION_FACTOR = 0.414
+APPS_NET_FACTOR = 1.0 - APPS_RETENTION_FACTOR
+
+
+def compute_apps_retention_estimate(apps_gross, retention_factor=APPS_RETENTION_FACTOR):
+    """Costo estimado de comisiones, impuestos y cargos de PY + Rappi."""
+    return float(apps_gross or 0.0) * float(retention_factor)
+
+
+def compute_apps_net_estimate(apps_gross, retention_factor=APPS_RETENTION_FACTOR):
+    """Ingreso neto estimado que dejan las ventas brutas realizadas por apps."""
+    gross = float(apps_gross or 0.0)
+    return gross - compute_apps_retention_estimate(gross, retention_factor)
+
+
+def compute_adjusted_profit(
+    total_sales,
+    paid_expenses,
+    apps_gross,
+    retention_factor=APPS_RETENTION_FACTOR,
+):
+    """
+    Ganancia calculada ajustada.
+
+    ventas brutas
+    - gastos cargados
+    - retención estimada sobre ventas brutas de PY + Rappi
+    """
+    return (
+        float(total_sales or 0.0)
+        - float(paid_expenses or 0.0)
+        - compute_apps_retention_estimate(apps_gross, retention_factor)
+    )
+
+
+
+# =========================================================
 # GANANCIA REAL
 # =========================================================
 
@@ -14,10 +57,16 @@ def compute_real_total(cash, digital, apps_collected):
 
 
 def compute_pending_net(apps, apps_collected):
+    """
+    Parte pendiente usada para explicar el desfase diario.
+
+    ``apps`` contiene ventas brutas de PY + Rappi, por lo que se convierten a
+    neto estimado. ``apps_collected`` ya es dinero efectivamente acreditado.
+    """
     pending_net = 0.0
 
     if apps is not None:
-        pending_net += float(apps)
+        pending_net += compute_apps_net_estimate(apps)
 
     if apps_collected is not None:
         pending_net -= float(apps_collected)
