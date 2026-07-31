@@ -145,7 +145,26 @@ def dashboard_finanzas():
     profit = income - expense
 
     margen_periodo = (profit / income * 100.0) if income else None
-    bucket_label, bucket_class = margin_bucket(margen_periodo)
+
+    # Rangos específicos del dashboard:
+    # Malo <= 10%; Regular > 10% y < 20%; Bueno >= 20%.
+    if margen_periodo is None:
+        bucket_label, bucket_class = "—", "pill"
+    elif margen_periodo <= 10:
+        bucket_label, bucket_class = "Malo", "pill bad"
+    elif margen_periodo < 20:
+        bucket_label, bucket_class = "Regular", "pill warn"
+    else:
+        bucket_label, bucket_class = "Bueno", "pill ok"
+
+    if bucket_label == "Malo":
+        margin_card_style = "background:rgba(220,38,38,.10); border-color:rgba(220,38,38,.25);"
+    elif bucket_label == "Regular":
+        margin_card_style = "background:rgba(245,158,11,.14); border-color:rgba(245,158,11,.32);"
+    elif bucket_label == "Bueno":
+        margin_card_style = "background:rgba(22,163,74,.11); border-color:rgba(22,163,74,.24);"
+    else:
+        margin_card_style = ""
 
     sueldo_ximena = (
         db.session.query(func.coalesce(func.sum(ExpenseEntry.amount), 0.0))
@@ -182,61 +201,28 @@ def dashboard_finanzas():
     worst3 = ranked_sorted[:3]
     best3 = list(reversed(ranked_sorted[-3:]))
 
-    ALERT_EXPENSE_THRESHOLD = 500_000
-    alerts_clean = []
-    for r in ranked:
-        if r["expense"] > ALERT_EXPENSE_THRESHOLD:
-            dday = parse_ymd(r["date_iso"])
-            bday = BusinessDay.query.filter_by(day=dday).first()
-            detail = ""
-            if bday:
-                if bday.expenses and len(bday.expenses) > 0:
-                    parts = []
-                    for e in sorted(bday.expenses, key=lambda x: x.amount or 0, reverse=True)[:6]:
-                        parts.append(f"{e.category.name}: {ars(e.amount)}")
-                    detail = " | ".join(parts)
-                else:
-                    parts = []
-                    if (bday.note or "").strip():
-                        parts.append((bday.note or "").strip())
-                    for s in bday.shifts:
-                        if (s.note or "").strip():
-                            parts.append(f"{s.shift}: {(s.note or '').strip()}")
-                    detail = " | ".join(parts).strip()
-
-            if not detail:
-                detail = "Sin detalle cargado."
-
-            alerts_clean.append({"date_ar": fmt_date_ar(dday), "expense": r["expense"], "detail": detail})
-
-    def rank_rows(items):
+    def rank_rows(items, positive_highlight=False):
         if not items:
             return "<tr><td colspan='3' class='muted'>Sin datos</td></tr>"
         out = ""
         for rr in items:
-            cls = "neg" if rr["profit"] < 0 else ""
+            if positive_highlight:
+                profit_style = "color:#16a34a; font-weight:800;"
+                profit_class = ""
+            else:
+                profit_style = ""
+                profit_class = "neg" if rr["profit"] < 0 else ""
             out += (
                 "<tr>"
                 f"<td>{rr['date_ar']}</td>"
                 f"<td class='num'>{ars(rr['income'])}</td>"
-                f"<td class='num {cls}'>{ars(rr['profit'])}</td>"
+                f"<td class='num {profit_class}' style='{profit_style}'>{ars(rr['profit'])}</td>"
                 "</tr>"
             )
         return out
 
-    best_html = rank_rows(best3)
+    best_html = rank_rows(best3, positive_highlight=True)
     worst_html = rank_rows(worst3)
-
-    if not alerts_clean:
-        alerts_html = "<div class='muted'>Sin alertas (no hubo días con gastos mayores a $ 500.000).</div>"
-    else:
-        alerts_html = "<ul style='margin:0; padding-left:18px;'>"
-        for a in alerts_clean[:50]:
-            alerts_html += (
-                f"<li><b>{a['date_ar']}</b> — Gastos: <b>{ars(a['expense'])}</b><br/>"
-                f"<span class='muted'>{a['detail']}</span></li>"
-            )
-        alerts_html += "</ul>"
 
     if income > 0:
         pie_labels = ["Ingresos", "Gastos", "Ganancia"] if profit >= 0 else ["Ingresos", "Gastos", "Pérdida"]
@@ -245,7 +231,207 @@ def dashboard_finanzas():
         pie_labels = ["Ingresos", "Gastos", "Ganancia"]
         pie_values = [0, 0, 0]
 
-    charts_payload = {"pie": {"labels": pie_labels, "values": pie_values}}
+    # =========================================================
+    # ANÁLISIS MENSUAL DE LIQUIDEZ DEL AÑO SELECCIONADO
+    # =========================================================
+    analysis_year = d2.year
+    base_month_labels = [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+    ]
+
+    # Barras verdes: ingresos líquidos efectivamente registrados.
+    # Barras rojas: gastos del mismo conjunto de días.
+    # Barra violeta: saldo líquido comparable al cierre de cada mes,
+    # calculado con exactamente la misma lógica que el KPI superior.
+    monthly_liquid_income = [0.0] * 12
+    monthly_liquid_expense = [0.0] * 12
+    monthly_liquid_profit = [None] * 12
+    monthly_total_days = [0] * 12
+    monthly_liquid_days = [0] * 12
+
+    annual_series = range_series(
+        date(analysis_year, 1, 1),
+        date(analysis_year, 12, 31),
+    )
+    annual_bdays = (
+        BusinessDay.query
+        .filter(
+            BusinessDay.day >= date(analysis_year, 1, 1),
+            BusinessDay.day <= date(analysis_year, 12, 31),
+        )
+        .order_by(BusinessDay.day.asc())
+        .all()
+    )
+    annual_bmap = {b.day: b for b in annual_bdays}
+    annual_items_by_month = {month: [] for month in range(1, 13)}
+
+    for item in annual_series:
+        item_day = parse_ymd(item["date"])
+        annual_items_by_month[item_day.month].append(item)
+
+    for month_number in range(1, 13):
+        month_index = month_number - 1
+        month_items = annual_items_by_month[month_number]
+        if not month_items:
+            continue
+
+        monthly_total_days[month_index] = len(month_items)
+
+        month_bdays = [
+            annual_bmap[parse_ymd(item["date"])]
+            for item in month_items
+            if parse_ymd(item["date"]) in annual_bmap
+        ]
+        opening_reserved_funds = (
+            float(getattr(month_bdays[0], "opening_cash_balance", 0.0) or 0.0)
+            if month_bdays
+            else 0.0
+        )
+
+        reserve_movements = []
+        last_comparable_balance = None
+
+        for item in month_items:
+            item_day = parse_ymd(item["date"])
+            b = annual_bmap.get(item_day)
+            if not b:
+                continue
+
+            has_liquid_data = (
+                getattr(b, "daily_mercadopago", None) is not None
+                or getattr(b, "daily_cash_withdrawn", None) is not None
+                or getattr(b, "real_apps_collected", None) is not None
+            )
+
+            daily_liquidity = (
+                float(getattr(b, "daily_mercadopago", 0.0) or 0.0)
+                + float(getattr(b, "daily_cash_withdrawn", 0.0) or 0.0)
+                + float(getattr(b, "real_apps_collected", 0.0) or 0.0)
+            )
+            expense_day = float(item["expense_total"] or 0.0)
+            net_liquidity = daily_liquidity - expense_day if has_liquid_data else 0.0
+
+            if has_liquid_data:
+                monthly_liquid_days[month_index] += 1
+                monthly_liquid_income[month_index] += daily_liquidity
+                monthly_liquid_expense[month_index] += expense_day
+                expected_total_balance = compute_expected_cash_balance(
+                    opening_balance=getattr(b, "opening_cash_balance", None),
+                    cash_income=daily_liquidity,
+                    paid_expenses=expense_day,
+                    safe_box_transfer=getattr(b, "safe_box_transfer", None),
+                )
+            elif getattr(b, "expected_cash_balance", None) is not None:
+                expected_total_balance = float(b.expected_cash_balance)
+            else:
+                expected_total_balance = None
+
+            reserve_movements.append(
+                {
+                    "net_liquidity": float(net_liquidity),
+                    "reserve_addition": max(
+                        float(getattr(b, "safe_box_transfer", 0.0) or 0.0),
+                        0.0,
+                    ),
+                    "actual_balance": getattr(b, "actual_cash_balance", None),
+                }
+            )
+            reserve_state = compute_reserved_funds_series(
+                opening_reserved_funds,
+                reserve_movements,
+            )[-1]
+
+            if expected_total_balance is not None:
+                last_comparable_balance = compute_comparable_liquid_balance(
+                    expected_total_balance,
+                    reserve_state["reserve_available"],
+                )
+
+        if monthly_liquid_days[month_index] > 0:
+            monthly_liquid_profit[month_index] = last_comparable_balance
+
+    # El gráfico arranca en el primer mes con carga líquida completa.
+    # Para 2026, ese mes es junio.
+    first_complete_month_index = next(
+        (
+            i
+            for i in range(12)
+            if monthly_total_days[i] > 0
+            and monthly_liquid_days[i] == monthly_total_days[i]
+        ),
+        None,
+    )
+    if first_complete_month_index is None:
+        first_complete_month_index = next(
+            (i for i in range(12) if monthly_liquid_days[i] > 0),
+            0,
+        )
+
+    visible_month_indexes = list(range(first_complete_month_index, 12))
+    month_labels = [base_month_labels[i] for i in visible_month_indexes]
+
+    monthly_margin_pct = [
+        (
+            (monthly_liquid_profit[i] / monthly_liquid_income[i]) * 100.0
+            if monthly_liquid_profit[i] is not None
+            and abs(monthly_liquid_income[i]) > 1e-9
+            else None
+        )
+        for i in visible_month_indexes
+    ]
+
+    def _monthly_table_value(value):
+        return "—" if value is None else ars(value)
+
+    month_header_html = "".join(
+        f"<th class='num'>{base_month_labels[i]}</th>"
+        for i in visible_month_indexes
+    )
+    monthly_income_cells = "".join(
+        f"<td class='num'>{_monthly_table_value(monthly_liquid_income[i] if monthly_liquid_days[i] > 0 else None)}</td>"
+        for i in visible_month_indexes
+    )
+    monthly_expense_cells = "".join(
+        f"<td class='num'>{_monthly_table_value(monthly_liquid_expense[i] if monthly_liquid_days[i] > 0 else None)}</td>"
+        for i in visible_month_indexes
+    )
+    monthly_profit_cells = "".join(
+        f"<td class='num'>{_monthly_table_value(monthly_liquid_profit[i])}</td>"
+        for i in visible_month_indexes
+    )
+    charts_payload = {
+        "pie": {
+            "labels": pie_labels,
+            "values": pie_values,
+        },
+        "monthly": {
+            "year": analysis_year,
+            "labels": month_labels,
+            "income": [
+                round(monthly_liquid_income[i], 2)
+                if monthly_liquid_days[i] > 0
+                else None
+                for i in visible_month_indexes
+            ],
+            "expense": [
+                round(monthly_liquid_expense[i], 2)
+                if monthly_liquid_days[i] > 0
+                else None
+                for i in visible_month_indexes
+            ],
+            "profit": [
+                None
+                if monthly_liquid_profit[i] is None
+                else round(monthly_liquid_profit[i], 2)
+                for i in visible_month_indexes
+            ],
+            "margin_pct": [
+                None if value is None else round(value, 2)
+                for value in monthly_margin_pct
+            ],
+        },
+    }
     charts_json = json.dumps(charts_payload, ensure_ascii=False)
 
     if missing_days:
@@ -260,6 +446,14 @@ def dashboard_finanzas():
         .all()
     )
     bmap = {b.day: b for b in bdays}
+
+    ingresos_liquidos_acumulados = sum(
+        float(getattr(b, "daily_mercadopago", 0.0) or 0.0)
+        + float(getattr(b, "daily_cash_withdrawn", 0.0) or 0.0)
+        + float(getattr(b, "real_apps_collected", 0.0) or 0.0)
+        for b in bdays
+        if not is_sunday(b.day)
+    )
 
     # =========================================================
     # COBRO POR APPS (próximo viernes)
@@ -596,29 +790,39 @@ def dashboard_finanzas():
     </details>
 
     <div class="grid8">
-      <div class="card kpi income">
-        <div class="label">Ingresos</div>
+      <!-- Fila 1 -->
+      <div class="card kpi" style="background:rgba(22,163,74,.11); border-color:rgba(22,163,74,.24);">
+        <div class="label">Ingresos brutos</div>
         <div class="value">{ars(income)}</div>
+        <div class="muted">Ventas registradas en el período</div>
       </div>
 
       <div class="card kpi expense">
         <div class="label">Gastos</div>
         <div class="value">{ars(expense)}</div>
-      </div>
-
-      <div class="card kpi profit">
-        <div class="label">Ganancia Líquida Acumulada</div>
-        <div class="value">{ars(cmp_liquid_profit_accum[-1] if cmp_liquid_profit_accum else 0.0)}</div>
-        <div class="muted">Saldo esperado al cierre menos fondos reservados disponibles</div>
+        <div class="muted">Gastos totales del período</div>
       </div>
 
       <div class="card kpi blue">
-        <div class="label">Ganancia Calculada Acumulada</div>
+        <div class="label">Ganancia calculada acumulada</div>
         <div class="value">{ars(cmp_calc_accum[-1] if cmp_calc_accum else 0.0)}</div>
-        <div class="muted">Acumulado del mes</div>
+        <div class="muted">Ventas menos gastos</div>
       </div>
 
-      <div class="card kpi">
+      <div class="card kpi" style="background:rgba(22,163,74,.17); border-color:rgba(22,163,74,.34);">
+        <div class="label">Ganancia real acumulada</div>
+        <div class="value">{ars(latest_real_accum) if latest_real_accum is not None else "—"}</div>
+        <div class="muted">Liquidez real atribuible al mes</div>
+      </div>
+
+      <!-- Fila 2 -->
+      <div class="card kpi" style="background:rgba(5,150,105,.14); border-color:rgba(5,150,105,.30);">
+        <div class="label">Ingresos líquidos acumulados</div>
+        <div class="value">{ars(ingresos_liquidos_acumulados)}</div>
+        <div class="muted">Apps cobradas + Mercado Pago + efectivo retirado</div>
+      </div>
+
+      <div class="card kpi" style="{margin_card_style}">
         <div class="margen-kpi">
           <div class="margen-left">
             <div class="label">Margen</div>
@@ -628,29 +832,30 @@ def dashboard_finanzas():
 
           <div class="margen-right">
             <div class="muted">Ref.</div>
-            <span class="pill bad">Malo ≤ 20</span>
-            <span class="pill warn">Regular ≤ 30</span>
-            <span class="pill ok">Bueno ≥ 31</span>
+            <span class="pill bad">Malo ≤ 10</span>
+            <span class="pill warn">Regular &lt; 20</span>
+            <span class="pill ok">Bueno ≥ 20</span>
           </div>
         </div>
       </div>
 
-      <div class="card kpi">
-        <div class="label">Cobro por Apps (próximo viernes)</div>
-        <div class="value">{ars(apps_a_cobrar_estimado)}</div>
-        <div class="muted">período: {periodo_cobro_str}</div>
+      <div class="card kpi" style="background:rgba(124,58,237,.13); border-color:rgba(124,58,237,.30);">
+        <div class="label">Ganancia líquida acumulada</div>
+        <div class="value">{ars(cmp_liquid_profit_accum[-1] if cmp_liquid_profit_accum else 0.0)}</div>
+        <div class="muted">Saldo esperado al cierre menos fondos reservados</div>
       </div>
 
-      <div class="card kpi">
+      <div class="card kpi" style="background:rgba(244,63,94,.11); border-color:rgba(244,63,94,.27);">
         <div class="label">Sueldo Ximena</div>
         <div class="value">{ars(sueldo_ximena)}</div>
         <div class="muted">Gasto fijo en el rango</div>
       </div>
 
-      <div class="card kpi income">
-        <div class="label">Liquidez Real Atribuible al Mes</div>
-        <div class="value">{ars(latest_real_accum) if latest_real_accum is not None else "—"}</div>
-        <div class="muted">Liquidez real total descontando solo la reserva aún disponible</div>
+      <!-- Fila 3 -->
+      <div class="card kpi">
+        <div class="label">Cobro por Apps (próximo viernes)</div>
+        <div class="value">{ars(apps_a_cobrar_estimado)}</div>
+        <div class="muted">Período: {periodo_cobro_str}</div>
       </div>
 
       <div class="card kpi">
@@ -658,7 +863,6 @@ def dashboard_finanzas():
         <div class="value">{ars(latest_reserved_funds)}</div>
         <div class="muted">Saldo anterior + agregados - consumos</div>
       </div>
-
     </div>
 
     <div class="grid">
@@ -667,27 +871,64 @@ def dashboard_finanzas():
         <div class="chartbox"><canvas id="pieChart"></canvas></div>
         <p class="muted" style="margin-top:10px;">(Domingos excluidos del cálculo)</p>
       </div>
+
       <div class="card">
-        <h3>Bloque 2 · Top 3 mejores días (ganancia)</h3>
-        <table>
-          <thead><tr><th>Fecha</th><th class="num">Ingresos</th><th class="num">Ganancia</th></tr></thead>
-          <tbody>{best_html}</tbody>
+        <h3>Bloque 2 · Mejores y peores días (ganancia)</h3>
+
+        <div class="ranking-section">
+          <h4>Top 3 mejores días</h4>
+          <table>
+            <thead><tr><th>Fecha</th><th class="num">Ingresos</th><th class="num">Ganancia</th></tr></thead>
+            <tbody>{best_html}</tbody>
+          </table>
+        </div>
+
+        <div class="ranking-section">
+          <h4>Top 3 peores días</h4>
+          <table>
+            <thead><tr><th>Fecha</th><th class="num">Ingresos</th><th class="num">Ganancia</th></tr></thead>
+            <tbody>{worst_html}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Bloque 3 · Resumen mensual de liquidez {analysis_year}</h3>
+      <div style="overflow-x:auto;">
+        <table class="monthly-summary-table">
+          <thead>
+            <tr>
+              <th>Mes</th>
+              {month_header_html}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th style="color:#16a34a;">Ingresos líquidos</th>
+              {monthly_income_cells}
+            </tr>
+            <tr>
+              <th style="color:#dc2626;">Gastos</th>
+              {monthly_expense_cells}
+            </tr>
+            <tr>
+              <th style="color:#7c3aed;">Ganancia líquida</th>
+              {monthly_profit_cells}
+            </tr>
+          </tbody>
         </table>
       </div>
     </div>
 
-    <div class="grid">
-      <div class="card">
-        <h3>Bloque 3 · Top 3 peores días (ganancia)</h3>
-        <table>
-          <thead><tr><th>Fecha</th><th class="num">Ingresos</th><th class="num">Ganancia</th></tr></thead>
-          <tbody>{worst_html}</tbody>
-        </table>
-      </div>
-      <div class="card">
-        <h3>Bloque 4 · Alertas (Gastos &gt; {ars(500000)})</h3>
-        {alerts_html}
-      </div>
+    <div class="card">
+      <h3>Bloque 4 · Análisis mensual de liquidez {analysis_year}</h3>
+      <div class="chartbox monthly-chartbox"><canvas id="monthlyBarChart"></canvas></div>
+      <p class="muted" style="margin-top:10px;">
+        Ingresos líquidos = Apps cobradas + Mercado Pago diario + efectivo retirado.
+        La barra violeta muestra la ganancia líquida acumulada al cierre de cada mes, con la misma lógica que el KPI superior.
+        El porcentaje sobre cada grupo representa ganancia líquida / ingresos líquidos.
+      </p>
     </div>
 
     <div class="card" id="profit-control">
@@ -804,6 +1045,236 @@ def dashboard_finanzas():
             }}
           }},
           plugins: [shadowPlugin, pieValuePlugin]
+        }});
+      }}
+
+      const monthlyValuePlugin = {{
+        id: 'monthlyValuePlugin',
+        afterDatasetsDraw(chart) {{
+          if (chart.canvas.id !== 'monthlyBarChart') return;
+
+          const ctx = chart.ctx;
+
+          function drawRoundedLabel(x, y, text, options = {{}}) {{
+            const paddingX = options.paddingX ?? 8;
+            const paddingY = options.paddingY ?? 4;
+            const radius = options.radius ?? 8;
+            const bg = options.bg ?? 'rgba(255,255,255,0.96)';
+            const border = options.border ?? 'rgba(148,163,184,0.65)';
+            const color = options.color ?? '#111827';
+
+            ctx.save();
+            ctx.font = options.font ?? '700 10px Arial';
+            const metrics = ctx.measureText(text);
+            const width = metrics.width + paddingX * 2;
+            const height = 18 + paddingY * 2;
+            const left = x - width / 2;
+            const top = y - height / 2;
+
+            ctx.beginPath();
+            ctx.moveTo(left + radius, top);
+            ctx.lineTo(left + width - radius, top);
+            ctx.quadraticCurveTo(left + width, top, left + width, top + radius);
+            ctx.lineTo(left + width, top + height - radius);
+            ctx.quadraticCurveTo(left + width, top + height, left + width - radius, top + height);
+            ctx.lineTo(left + radius, top + height);
+            ctx.quadraticCurveTo(left, top + height, left, top + height - radius);
+            ctx.lineTo(left, top + radius);
+            ctx.quadraticCurveTo(left, top, left + radius, top);
+            ctx.closePath();
+
+            ctx.fillStyle = bg;
+            ctx.fill();
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = border;
+            ctx.stroke();
+
+            ctx.fillStyle = color;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x, y + 0.5);
+            ctx.restore();
+          }}
+
+          function drawLeaderLabel(bar, text, direction) {{
+            const anchorX = bar.x;
+            const anchorY = bar.y;
+            const labelX = anchorX + (direction === 'left' ? -38 : 38);
+            const labelY = anchorY - 22;
+
+            ctx.save();
+            ctx.strokeStyle = 'rgba(107,114,128,0.9)';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(anchorX, anchorY - 2);
+            ctx.lineTo(anchorX, anchorY - 14);
+            ctx.lineTo(labelX, labelY + 8);
+            ctx.stroke();
+            ctx.restore();
+
+            drawRoundedLabel(labelX, labelY, text, {{
+              bg: 'rgba(255,255,255,0.98)',
+              border: 'rgba(203,213,225,0.95)',
+              color: '#1f2937',
+              font: '700 10px Arial',
+              paddingX: 7,
+              paddingY: 3,
+              radius: 7
+            }});
+          }}
+
+          ctx.save();
+
+          chart.data.datasets.forEach((dataset, datasetIndex) => {{
+            const meta = chart.getDatasetMeta(datasetIndex);
+            if (meta.hidden) return;
+
+            meta.data.forEach((bar, index) => {{
+              const raw = dataset.data[index];
+              if (raw === null || raw === undefined) return;
+              const value = Number(raw);
+              if (!Number.isFinite(value) || value === 0) return;
+
+              const label = fmtMoney(value);
+
+              if (datasetIndex === 0) {{
+                drawLeaderLabel(bar, label, 'left');
+              }} else if (datasetIndex === 1) {{
+                drawLeaderLabel(bar, label, 'right');
+              }} else {{
+                const y = value >= 0 ? bar.y - 8 : bar.y + 18;
+                drawRoundedLabel(bar.x, y, label, {{
+                  bg: 'rgba(255,255,255,0.96)',
+                  border: 'rgba(203,213,225,0.9)',
+                  color: '#4c1d95',
+                  font: '700 10px Arial',
+                  paddingX: 7,
+                  paddingY: 3,
+                  radius: 7
+                }});
+              }}
+            }});
+          }});
+
+          ctx.font = '800 12px Arial';
+          ctx.fillStyle = '#111827';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          const marginValues = payload.monthly.margin_pct || [];
+          chart.data.labels.forEach((_, index) => {{
+            const pct = marginValues[index];
+            if (pct === null || pct === undefined || !Number.isFinite(Number(pct))) return;
+
+            const bars = [];
+            chart.data.datasets.forEach((dataset, datasetIndex) => {{
+              const raw = dataset.data[index];
+              const meta = chart.getDatasetMeta(datasetIndex);
+              if (
+                !meta.hidden
+                && raw !== null
+                && raw !== undefined
+                && meta.data[index]
+              ) {{
+                bars.push(meta.data[index]);
+              }}
+            }});
+
+            if (!bars.length) return;
+
+            const centerX = bars.reduce((sum, bar) => sum + bar.x, 0) / bars.length;
+            const percentageLevel = 29_000_000;
+            const labelY = chart.scales.y.getPixelForValue(percentageLevel);
+            const pctLabel = Number(pct).toLocaleString('es-AR', {{
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1
+            }}) + '%';
+
+            drawRoundedLabel(centerX, labelY, pctLabel, {{
+              bg: 'rgba(255,255,255,0.98)',
+              border: 'rgba(156,163,175,0.9)',
+              color: '#111827',
+              font: '800 11px Arial',
+              paddingX: 8,
+              paddingY: 3,
+              radius: 8
+            }});
+          }});
+
+          ctx.restore();
+        }}
+      }};
+
+      const monthlyCanvas = document.getElementById('monthlyBarChart');
+      if (monthlyCanvas) {{
+        new Chart(monthlyCanvas, {{
+          type: 'bar',
+          data: {{
+            labels: payload.monthly.labels,
+            datasets: [
+              {{
+                label: 'Ingresos líquidos',
+                categoryPercentage: 0.84,
+                barPercentage: 0.94,
+                maxBarThickness: 58,
+                data: payload.monthly.income,
+                backgroundColor: 'rgba(22,163,74,0.82)',
+                borderColor: '#16a34a',
+                borderWidth: 1
+              }},
+              {{
+                label: 'Gastos',
+                categoryPercentage: 0.84,
+                barPercentage: 0.94,
+                maxBarThickness: 58,
+                data: payload.monthly.expense,
+                backgroundColor: 'rgba(220,38,38,0.78)',
+                borderColor: '#dc2626',
+                borderWidth: 1
+              }},
+              {{
+                label: 'Ganancia líquida acumulada',
+                categoryPercentage: 0.84,
+                barPercentage: 0.94,
+                maxBarThickness: 58,
+                data: payload.monthly.profit,
+                backgroundColor: 'rgba(124,58,237,0.82)',
+                borderColor: '#7c3aed',
+                borderWidth: 1
+              }}
+            ]
+          }},
+          options: {{
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {{
+              padding: {{ top: 68 }}
+            }},
+            plugins: {{
+              legend: {{ position: 'bottom' }},
+              tooltip: {{
+                callbacks: {{
+                  label: function(ctx) {{
+                    return `${{ctx.dataset.label}}: ${{fmtMoney(ctx.raw)}}`;
+                  }}
+                }}
+              }}
+            }},
+            scales: {{
+              x: {{
+                grid: {{ display: false }}
+              }},
+              y: {{
+                beginAtZero: true,
+                max: 30000000,
+                ticks: {{
+                  stepSize: 5000000,
+                  callback: function(value){{ return fmtMoney(value); }}
+                }}
+              }}
+            }}
+          }},
+          plugins: [monthlyValuePlugin]
         }});
       }}
 
