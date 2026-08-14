@@ -9,8 +9,10 @@ from app.services.finance_service import (
     APPS_RETENTION_FACTOR,
     compute_explained_total,
     compute_expected_cash_balance,
-    compute_comparable_liquid_balance,
-    compute_reserved_funds_series,
+    compute_available_liquidity_change,
+    resolve_reserved_funds_balance,
+    compute_calc_liquid_reconciliation,
+    compute_reconciliation_status,
 )
 
 from app.extensions import db
@@ -40,6 +42,39 @@ def _helpers():
 
 def _money_input(v):
     return "" if v is None else str(float(v))
+
+
+def _reserved_funds_before(day):
+    previous_change = (
+        BusinessDay.query
+        .filter(BusinessDay.day < day)
+        .filter(BusinessDay.reserved_funds_balance.isnot(None))
+        .order_by(BusinessDay.day.desc())
+        .first()
+    )
+    if previous_change is None:
+        return 0.0
+    return max(
+        float(getattr(previous_change, "reserved_funds_balance", 0.0) or 0.0),
+        0.0,
+    )
+
+
+def _real_opening_base(month_start, month_days=None):
+    previous_close = (
+        BusinessDay.query
+        .filter(BusinessDay.day < month_start)
+        .filter(BusinessDay.actual_cash_balance.isnot(None))
+        .order_by(BusinessDay.day.desc())
+        .first()
+    )
+    if previous_close is not None:
+        return float(previous_close.actual_cash_balance or 0.0)
+
+    month_days = month_days or []
+    if month_days:
+        return float(getattr(month_days[0], "opening_cash_balance", 0.0) or 0.0)
+    return 0.0
 
 
 def _real_parts(bday):
@@ -149,23 +184,28 @@ def dashboard_finanzas():
 
     # Rangos específicos del dashboard:
     # Malo <= 10%; Regular > 10% y < 20%; Bueno >= 20%.
-    if margen_periodo is None:
-        bucket_label, bucket_class = "—", "pill"
-    elif margen_periodo <= 10:
-        bucket_label, bucket_class = "Malo", "pill bad"
-    elif margen_periodo < 20:
-        bucket_label, bucket_class = "Regular", "pill warn"
-    else:
-        bucket_label, bucket_class = "Bueno", "pill ok"
+    def margin_visual_state(value):
+        if value is None:
+            return "—", "pill", ""
+        if value <= 10:
+            return (
+                "Malo",
+                "pill bad",
+                "background:rgba(220,38,38,.10); border-color:rgba(220,38,38,.25);",
+            )
+        if value < 20:
+            return (
+                "Regular",
+                "pill warn",
+                "background:rgba(245,158,11,.14); border-color:rgba(245,158,11,.32);",
+            )
+        return (
+            "Bueno",
+            "pill ok",
+            "background:rgba(22,163,74,.11); border-color:rgba(22,163,74,.24);",
+        )
 
-    if bucket_label == "Malo":
-        margin_card_style = "background:rgba(220,38,38,.10); border-color:rgba(220,38,38,.25);"
-    elif bucket_label == "Regular":
-        margin_card_style = "background:rgba(245,158,11,.14); border-color:rgba(245,158,11,.32);"
-    elif bucket_label == "Bueno":
-        margin_card_style = "background:rgba(22,163,74,.11); border-color:rgba(22,163,74,.24);"
-    else:
-        margin_card_style = ""
+    bucket_label, bucket_class, margin_card_style = margin_visual_state(margen_periodo)
 
     sueldo_ximena = (
         db.session.query(func.coalesce(func.sum(ExpenseEntry.amount), 0.0))
@@ -237,8 +277,9 @@ def dashboard_finanzas():
 
     # Barras verdes: ingresos líquidos efectivamente registrados.
     # Barras rojas: gastos del mismo conjunto de días.
-    # Barra violeta: saldo líquido comparable al cierre de cada mes,
-    # calculado con exactamente la misma lógica que el KPI superior.
+    # Barra violeta: variación de la liquidez disponible respecto de la base
+    # real de apertura de cada mes. La liquidez esperada conserva su lógica
+    # diaria: cada cierre parte del saldo real de apertura de ese día.
     monthly_liquid_income = [0.0] * 12
     monthly_liquid_expense = [0.0] * 12
     monthly_liquid_profit = [None] * 12
@@ -272,20 +313,15 @@ def dashboard_finanzas():
             continue
 
         monthly_total_days[month_index] = len(month_items)
-
+        month_start_date = date(analysis_year, month_number, 1)
         month_bdays = [
             annual_bmap[parse_ymd(item["date"])]
             for item in month_items
             if parse_ymd(item["date"]) in annual_bmap
         ]
-        opening_reserved_funds = (
-            float(getattr(month_bdays[0], "opening_cash_balance", 0.0) or 0.0)
-            if month_bdays
-            else 0.0
-        )
-
-        reserve_movements = []
-        last_comparable_balance = None
+        month_base_real = _real_opening_base(month_start_date, month_bdays)
+        running_reserved = _reserved_funds_before(month_start_date)
+        liquid_result_running = 0.0
 
         for item in month_items:
             item_day = parse_ymd(item["date"])
@@ -293,10 +329,10 @@ def dashboard_finanzas():
             if not b:
                 continue
 
-            has_liquid_data = (
-                getattr(b, "daily_mercadopago", None) is not None
-                or getattr(b, "daily_cash_withdrawn", None) is not None
-                or getattr(b, "real_apps_collected", None) is not None
+            explicit_reserved = getattr(b, "reserved_funds_balance", None)
+            current_reserved = resolve_reserved_funds_balance(
+                running_reserved,
+                explicit_reserved,
             )
 
             daily_liquidity = (
@@ -305,46 +341,36 @@ def dashboard_finanzas():
                 + float(getattr(b, "real_apps_collected", 0.0) or 0.0)
             )
             expense_day = float(item["expense_total"] or 0.0)
-            net_liquidity = daily_liquidity - expense_day if has_liquid_data else 0.0
+
+            has_liquid_data = (
+                getattr(b, "daily_mercadopago", None) is not None
+                or getattr(b, "daily_cash_withdrawn", None) is not None
+                or getattr(b, "real_apps_collected", None) is not None
+            )
+            has_liquid_activity = (
+                has_liquid_data
+                or explicit_reserved is not None
+                or abs(expense_day) > 1e-9
+            )
 
             if has_liquid_data:
                 monthly_liquid_days[month_index] += 1
                 monthly_liquid_income[month_index] += daily_liquidity
                 monthly_liquid_expense[month_index] += expense_day
-                expected_total_balance = compute_expected_cash_balance(
-                    opening_balance=getattr(b, "opening_cash_balance", None),
+
+            if has_liquid_activity:
+                daily_liquid_change = compute_available_liquidity_change(
                     cash_income=daily_liquidity,
                     paid_expenses=expense_day,
-                    safe_box_transfer=getattr(b, "safe_box_transfer", None),
+                    previous_reserved_funds=running_reserved,
+                    current_reserved_funds=current_reserved,
                 )
-            elif getattr(b, "expected_cash_balance", None) is not None:
-                expected_total_balance = float(b.expected_cash_balance)
-            else:
-                expected_total_balance = None
+                liquid_result_running += daily_liquid_change
 
-            reserve_movements.append(
-                {
-                    "net_liquidity": float(net_liquidity),
-                    "reserve_addition": max(
-                        float(getattr(b, "safe_box_transfer", 0.0) or 0.0),
-                        0.0,
-                    ),
-                    "actual_balance": getattr(b, "actual_cash_balance", None),
-                }
-            )
-            reserve_state = compute_reserved_funds_series(
-                opening_reserved_funds,
-                reserve_movements,
-            )[-1]
-
-            if expected_total_balance is not None:
-                last_comparable_balance = compute_comparable_liquid_balance(
-                    expected_total_balance,
-                    reserve_state["reserve_available"],
-                )
+            running_reserved = current_reserved
 
         if monthly_liquid_days[month_index] > 0:
-            monthly_liquid_profit[month_index] = last_comparable_balance
+            monthly_liquid_profit[month_index] = liquid_result_running
 
     # El gráfico arranca en el primer mes con carga líquida completa.
     # Para 2026, ese mes es junio.
@@ -417,52 +443,29 @@ def dashboard_finanzas():
         if not is_sunday(b.day)
     )
 
-    # =========================================================
-    # COBRO POR APPS (próximo viernes)
-    # =========================================================
-    def next_friday(d):
-        days_ahead = 4 - d.weekday()
-        if days_ahead <= 0:
-            days_ahead += 7
-        return d + timedelta(days=days_ahead)
-
-    def prev_monday(d):
-        days_back = d.weekday()
-        return d - timedelta(days=days_back)
-
-    proximo_viernes = next_friday(today)
-    lunes_cobro = prev_monday(proximo_viernes - timedelta(days=14))
-    sabado_cobro = lunes_cobro + timedelta(days=6)
-
-    apps_a_cobrar_bruto = 0.0
-    days_in_range = []
-    cur = lunes_cobro
-    while cur <= sabado_cobro:
-        if not is_sunday(cur):
-            days_in_range.append(cur)
-            b = bmap.get(cur)
-            if b:
-                apps_a_cobrar_bruto += float(getattr(b, "real_apps_pending", 0.0) or 0.0)
-        cur += timedelta(days=1)
-
-    apps_a_cobrar_estimado = apps_a_cobrar_bruto * (1 - APPS_RETENTION_FACTOR)
-    periodo_cobro_str = f"{fmt_date_ar(lunes_cobro)} al {fmt_date_ar(sabado_cobro)}"
-
     cmp_rows = []
+
+    # El eje X muestra todos los días laborables del período. Los días todavía
+    # no cargados se representan con valores None, de modo que Chart.js deja
+    # el espacio de la fecha pero no prolonga ninguna curva artificialmente.
     cmp_dates = []
     cmp_labels = []
-
     cmp_calc = []
     cmp_liquid_profit = []
     cmp_real_profit = []
+    cmp_calc_balance = []
+    cmp_liquid_balance = []
+    cmp_real_balance = []
+    cmp_reserved_markers = []
 
-    cmp_calc_accum = []
-    cmp_liquid_profit_accum = []
-    cmp_real_profit_accum = []
-    cmp_reserved_funds = []
+    # Resultados mensuales desde cero. Se mantienen separados de los saldos
+    # del gráfico para que los KPI continúen midiendo resultado del mes.
+    cmp_calc_result_accum = []
+    cmp_liquid_result_accum = []
+    cmp_real_result_accum = []
 
-    # Para que un filtro iniciado a mitad de mes conserve los acumulados
-    # correctos, calculamos internamente desde el primer día del mes inicial.
+    # Para un filtro iniciado a mitad de mes reconstruimos internamente desde
+    # el día 1, pero solo mostramos las fechas incluidas en el filtro.
     chart_start = d1.replace(day=1)
     chart_days = list(iter_workdays(chart_start, d2))
     chart_bdays = (
@@ -473,39 +476,65 @@ def dashboard_finanzas():
     )
     chart_bmap = {b.day: b for b in chart_bdays}
 
-    opening_reserved_by_month = {}
-    for b in chart_bdays:
-        month_key = (b.day.year, b.day.month)
-        if month_key not in opening_reserved_by_month:
-            opening_reserved_by_month[month_key] = float(
-                getattr(b, "opening_cash_balance", 0.0) or 0.0
-            )
-
     current_month_key = None
-    opening_reserved_funds = 0.0
-    calc_running = 0.0
-    liquid_profit_running = 0.0
-    reserve_movements = []
+    month_base_real = 0.0
+    calc_result_running = 0.0
+    liquid_result_running = 0.0
+    running_reserved_funds = 0.0
+    first_visible_month_point = True
 
     for d in chart_days:
         month_key = (d.year, d.month)
         if month_key != current_month_key:
             current_month_key = month_key
-            opening_reserved_funds = float(
-                opening_reserved_by_month.get(month_key, 0.0) or 0.0
+            month_start_date = d.replace(day=1)
+            month_bdays = [
+                item
+                for item in chart_bdays
+                if item.day.year == d.year and item.day.month == d.month
+            ]
+            month_base_real = _real_opening_base(
+                month_start_date,
+                month_bdays,
             )
-            calc_running = 0.0
-            liquid_profit_running = 0.0
-            reserve_movements = []
+            running_reserved_funds = _reserved_funds_before(month_start_date)
+            calc_result_running = 0.0
+            liquid_result_running = 0.0
+            first_visible_month_point = True
 
         b = chart_bmap.get(d)
+
+        # Por defecto el día no aporta puntos al gráfico.
+        calc = None
+        liquid_profit = None
+        real_profit = None
+        calc_balance = None
+        liquid_balance = None
+        real_balance = None
+        real_result_running = None
+        current_reserved_funds = running_reserved_funds
+        reserve_marker = None
+        has_calc_data = False
+        has_liquid_activity = False
+        has_real_data = False
+        actual_balance = None
 
         if b:
             ensure_shifts(b)
             recalc_day_status(b)
             t = day_totals(b)
 
-            calc = float(t.get("profit_adjusted", t["profit"]) or 0.0)
+            expense_day = float(t["expense_total"] or 0.0)
+            has_calc_data = (
+                abs(float(t["income"] or 0.0)) > 1e-9
+                or abs(expense_day) > 1e-9
+                or getattr(b, "real_apps_pending", None) is not None
+            )
+
+            if has_calc_data:
+                calc = float(t.get("profit_adjusted", t["profit"]) or 0.0)
+                calc_result_running += calc
+                calc_balance = month_base_real + calc_result_running
 
             daily_liquidity = (
                 float(getattr(b, "daily_mercadopago", 0.0) or 0.0)
@@ -513,146 +542,266 @@ def dashboard_finanzas():
                 + float(getattr(b, "real_apps_collected", 0.0) or 0.0)
             )
 
-            has_liquid_data = (
+            explicit_reserved = getattr(b, "reserved_funds_balance", None)
+            current_reserved_funds = resolve_reserved_funds_balance(
+                running_reserved_funds,
+                explicit_reserved,
+            )
+
+            has_liquid_activity = (
                 getattr(b, "daily_mercadopago", None) is not None
                 or getattr(b, "daily_cash_withdrawn", None) is not None
                 or getattr(b, "real_apps_collected", None) is not None
+                or explicit_reserved is not None
+                or abs(expense_day) > 1e-9
             )
 
-            liquid_profit = (
-                daily_liquidity - float(t["expense_total"] or 0.0)
-                if has_liquid_data
-                else None
-            )
-
-            if has_liquid_data:
-                expected_total_balance = compute_expected_cash_balance(
-                    opening_balance=getattr(b, "opening_cash_balance", None),
+            if has_liquid_activity:
+                liquid_profit = compute_available_liquidity_change(
                     cash_income=daily_liquidity,
-                    paid_expenses=t["expense_total"],
-                    safe_box_transfer=getattr(b, "safe_box_transfer", None),
+                    paid_expenses=expense_day,
+                    previous_reserved_funds=running_reserved_funds,
+                    current_reserved_funds=current_reserved_funds,
                 )
-            elif getattr(b, "expected_cash_balance", None) is not None:
-                expected_total_balance = float(b.expected_cash_balance)
-            else:
-                expected_total_balance = None
 
-            reserve_addition = max(
-                float(getattr(b, "safe_box_transfer", 0.0) or 0.0),
-                0.0,
-            )
+                # La curva violeta debe evolucionar de forma independiente de
+                # la caja real: parte de la misma base real mensual, pero luego
+                # acumula exclusivamente los movimientos líquidos esperados.
+                # Nunca se reinicia con el actual_cash_balance del día anterior.
+                liquid_result_running += liquid_profit
+                liquid_balance = month_base_real + liquid_result_running
 
             has_real_data = (
                 getattr(b, "real_cash_profit", None) is not None
                 or getattr(b, "real_digital_profit", None) is not None
                 or getattr(b, "real_apps_collected", None) is not None
             )
+            if has_real_data:
+                real_profit = (
+                    float(getattr(b, "real_cash_profit", 0.0) or 0.0)
+                    + float(getattr(b, "real_digital_profit", 0.0) or 0.0)
+                    + float(getattr(b, "real_apps_collected", 0.0) or 0.0)
+                )
 
-            real_profit = (
-                float(getattr(b, "real_cash_profit", 0.0) or 0.0)
-                + float(getattr(b, "real_digital_profit", 0.0) or 0.0)
-                + float(getattr(b, "real_apps_collected", 0.0) or 0.0)
-                if has_real_data
+            actual_balance = getattr(b, "actual_cash_balance", None)
+            if actual_balance is not None:
+                real_balance = float(actual_balance)
+                real_result_running = real_balance - month_base_real
+
+            reserve_marker = (
+                current_reserved_funds
+                if explicit_reserved is not None
                 else None
             )
 
-        else:
-            calc = 0.0
-            liquid_profit = None
-            expected_total_balance = None
-            reserve_addition = 0.0
-            real_profit = None
-            real_profit_accum = None
+        running_reserved_funds = current_reserved_funds
 
-        calc_running += float(calc or 0.0)
-
-        actual_balance = (
-            getattr(b, "actual_cash_balance", None)
-            if b is not None
-            else None
-        )
-
-        reserve_movements.append(
-            {
-                "net_liquidity": float(liquid_profit or 0.0)
-                if liquid_profit is not None
-                else 0.0,
-                "reserve_addition": reserve_addition,
-                "actual_balance": actual_balance,
-            }
-        )
-        reserve_state = compute_reserved_funds_series(
-            opening_reserved_funds,
-            reserve_movements,
-        )[-1]
-        reserved_funds_available = reserve_state["reserve_available"]
-
-        if expected_total_balance is not None:
-            liquid_profit_running = compute_comparable_liquid_balance(
-                expected_total_balance,
-                reserved_funds_available,
-            )
-
-        real_profit_accum = (
-            reserve_state["real_month_available"]
-            if actual_balance is not None
-            else None
-        )
-
-        # Los días anteriores al filtro solo sirven para reconstruir el
-        # acumulado mensual; no se muestran en la tabla ni en el gráfico.
+        # Los días anteriores al filtro reconstruyen los acumulados, pero no
+        # se muestran en el eje X.
         if d < d1:
             continue
 
-        cmp_rows.append(
-            {
-                "date": d,
-                "date_ar": fmt_date_ar(d),
-                "date_iso": d.isoformat(),
-                "calc": calc,
-                "calc_accum": calc_running,
-                "liquid_profit": liquid_profit,
-                "liquid_profit_accum": liquid_profit_running,
-                "real_profit": real_profit,
-                "real_profit_accum": real_profit_accum,
-                "reserved_funds_available": reserved_funds_available,
-            }
+        has_any_chart_data = (
+            has_calc_data
+            or has_liquid_activity
+            or has_real_data
+            or actual_balance is not None
+            or reserve_marker is not None
         )
+
+        # Aunque no haya una modificación explícita de la reserva, el primer
+        # día visible de cada mes muestra su saldo vigente. Después solo se
+        # marcan modificaciones explícitas.
+        if first_visible_month_point and reserve_marker is None:
+            reserve_marker = current_reserved_funds
+
+        first_visible_month_point = False
+
+        # La tabla inferior conserva únicamente días con información cargada;
+        # el gráfico, en cambio, muestra todas las fechas del período.
+        if has_any_chart_data:
+            cmp_rows.append(
+                {
+                    "date": d,
+                    "date_ar": fmt_date_ar(d),
+                    "date_iso": d.isoformat(),
+                    "calc": calc,
+                    "calc_accum": calc_balance,
+                    "liquid_profit": liquid_profit,
+                    "liquid_profit_accum": liquid_balance,
+                    "real_profit": real_profit,
+                    "real_profit_accum": real_balance,
+                    "reserved_funds_available": current_reserved_funds,
+                    "reserve_changed": explicit_reserved is not None if b is not None else False,
+                }
+            )
 
         cmp_dates.append(d.isoformat())
         cmp_labels.append(fmt_date_ar(d))
-
-        cmp_calc.append(round(calc, 2))
+        cmp_calc.append(None if calc is None else round(calc, 2))
         cmp_liquid_profit.append(
             None if liquid_profit is None else round(float(liquid_profit), 2)
         )
         cmp_real_profit.append(
             None if real_profit is None else round(float(real_profit), 2)
         )
-
-        cmp_calc_accum.append(round(calc_running, 2))
-        cmp_liquid_profit_accum.append(round(liquid_profit_running, 2))
-        cmp_real_profit_accum.append(
-            None if real_profit_accum is None else round(float(real_profit_accum), 2)
+        cmp_calc_balance.append(
+            None if calc_balance is None else round(calc_balance, 2)
         )
-        cmp_reserved_funds.append(round(reserved_funds_available, 2))
+        cmp_liquid_balance.append(
+            None if liquid_balance is None else round(liquid_balance, 2)
+        )
+        cmp_real_balance.append(
+            None if real_balance is None else round(real_balance, 2)
+        )
+        cmp_reserved_markers.append(
+            None if reserve_marker is None else round(float(reserve_marker), 2)
+        )
 
-    # Los KPI toman el último valor mensual disponible dentro del filtro.
+        # Los KPI conservan el último acumulado efectivamente calculable, pero
+        # esa persistencia no se dibuja como una línea en días sin datos.
+        if calc is not None:
+            cmp_calc_result_accum.append(round(calc_result_running, 2))
+        if liquid_balance is not None:
+            cmp_liquid_result_accum.append(round(liquid_result_running, 2))
+        if real_result_running is not None:
+            cmp_real_result_accum.append(round(real_result_running, 2))
+
+    # Los KPI de resultado mensual permanecen en cero al inicio del mes.
+    latest_calc_result = (
+        cmp_calc_result_accum[-1] if cmp_calc_result_accum else 0.0
+    )
+    latest_liquid_result = (
+        cmp_liquid_result_accum[-1] if cmp_liquid_result_accum else 0.0
+    )
     latest_real_accum = next(
-        (value for value in reversed(cmp_real_profit_accum) if value is not None),
+        (value for value in reversed(cmp_real_result_accum) if value is not None),
         None,
     )
-    latest_reserved_funds = (
-        cmp_reserved_funds[-1] if cmp_reserved_funds else 0.0
+
+    # Margen líquido: resultado líquido acumulado respecto de los ingresos
+    # que efectivamente ingresaron como liquidez en el período.
+    margen_liquido = (
+        latest_liquid_result / ingresos_liquidos_acumulados * 100.0
+        if ingresos_liquidos_acumulados
+        else None
+    )
+    liquid_bucket_label, liquid_bucket_class, liquid_margin_card_style = (
+        margin_visual_state(margen_liquido)
     )
 
-    # Torta del período: se mantiene separada de la ganancia calculada.
-    # Muestra exclusivamente las métricas de liquidez solicitadas.
-    liquid_profit_period = (
-        float(cmp_liquid_profit_accum[-1])
-        if cmp_liquid_profit_accum
-        else 0.0
+    # El fondo reservado es un saldo persistente: se arrastra hasta una
+    # modificación explícita, incluso entre meses.
+    latest_reserved_funds = _reserved_funds_before(d2 + timedelta(days=1))
+
+    # =========================================================
+    # CONCILIACIÓN CALCULADA VS. LÍQUIDA (MES VIGENTE)
+    # =========================================================
+    reconciliation_month_start = d2.replace(day=1)
+    reconciliation_days = (
+        BusinessDay.query
+        .filter(
+            BusinessDay.day >= reconciliation_month_start,
+            BusinessDay.day <= d2,
+        )
+        .order_by(BusinessDay.day.asc())
+        .all()
     )
+
+    reconciliation_active_days = []
+    reconciliation_apps_gross = 0.0
+    reconciliation_apps_collected = 0.0
+    reconciliation_liquid_reference = 0.0
+
+    for reconciliation_day in reconciliation_days:
+        if is_sunday(reconciliation_day.day):
+            continue
+
+        ensure_shifts(reconciliation_day)
+        recalc_day_status(reconciliation_day)
+        reconciliation_totals = day_totals(reconciliation_day)
+        reconciliation_expense = float(
+            reconciliation_totals["expense_total"] or 0.0
+        )
+        reconciliation_has_activity = (
+            abs(float(reconciliation_totals["income"] or 0.0)) > 1e-9
+            or abs(reconciliation_expense) > 1e-9
+            or getattr(reconciliation_day, "real_apps_pending", None) is not None
+            or getattr(reconciliation_day, "daily_mercadopago", None) is not None
+            or getattr(reconciliation_day, "daily_cash_withdrawn", None) is not None
+            or getattr(reconciliation_day, "real_apps_collected", None) is not None
+            or getattr(reconciliation_day, "reserved_funds_balance", None) is not None
+            or getattr(reconciliation_day, "actual_cash_balance", None) is not None
+        )
+        if not reconciliation_has_activity:
+            continue
+
+        reconciliation_active_days.append(reconciliation_day)
+        reconciliation_apps_gross += float(
+            getattr(reconciliation_day, "real_apps_pending", 0.0) or 0.0
+        )
+        reconciliation_apps_collected += float(
+            getattr(reconciliation_day, "real_apps_collected", 0.0) or 0.0
+        )
+        reconciliation_liquid_reference += (
+            float(getattr(reconciliation_day, "daily_mercadopago", 0.0) or 0.0)
+            + float(getattr(reconciliation_day, "daily_cash_withdrawn", 0.0) or 0.0)
+            + float(getattr(reconciliation_day, "real_apps_collected", 0.0) or 0.0)
+        )
+
+    previous_operating_day = (
+        BusinessDay.query
+        .filter(BusinessDay.day < reconciliation_month_start)
+        .order_by(BusinessDay.day.desc())
+        .first()
+    )
+    opening_operating_cash = (
+        getattr(previous_operating_day, "operating_cash_balance", None)
+        if previous_operating_day is not None
+        else None
+    )
+    latest_operating_cash = (
+        getattr(reconciliation_active_days[-1], "operating_cash_balance", None)
+        if reconciliation_active_days
+        else None
+    )
+
+    opening_reserved_funds_reconciliation = _reserved_funds_before(
+        reconciliation_month_start
+    )
+
+    accumulated_reconciliation = compute_calc_liquid_reconciliation(
+        calculated_profit=latest_calc_result,
+        liquid_profit=latest_liquid_result,
+        apps_gross=reconciliation_apps_gross,
+        apps_collected=reconciliation_apps_collected,
+        previous_operating_cash=opening_operating_cash,
+        current_operating_cash=latest_operating_cash,
+        previous_reserved_funds=opening_reserved_funds_reconciliation,
+        current_reserved_funds=latest_reserved_funds,
+    )
+    accumulated_reconciliation_status = compute_reconciliation_status(
+        accumulated_reconciliation["unexplained_gap"],
+        reconciliation_liquid_reference,
+    )
+
+    accumulated_reconciliation_style = ""
+    if accumulated_reconciliation_status["label"] == "Aceptable":
+        accumulated_reconciliation_style = "background:rgba(22,163,74,.10); border-color:rgba(22,163,74,.24);"
+    elif accumulated_reconciliation_status["label"] == "Medio":
+        accumulated_reconciliation_style = "background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.30);"
+    elif accumulated_reconciliation_status["label"] == "Riesgoso":
+        accumulated_reconciliation_style = "background:rgba(220,38,38,.10); border-color:rgba(220,38,38,.25);"
+
+    accumulated_unexplained_pct_text = (
+        "—"
+        if accumulated_reconciliation_status["pct"] is None
+        else f'{accumulated_reconciliation_status["pct"]:.1f}%'
+    )
+
+    # Torta del período: ingreso efectivo, gasto y variación líquida acumulada
+    # del mes, manteniendo la misma lógica del KPI superior.
+    liquid_profit_period = float(latest_liquid_result or 0.0)
 
     pie_labels = [
         "Ingresos líquidos",
@@ -705,9 +854,12 @@ def dashboard_finanzas():
         "calc": cmp_calc,
         "liquid_profit": cmp_liquid_profit,
         "real_profit": cmp_real_profit,
-        "calc_accum": cmp_calc_accum,
-        "liquid_profit_accum": cmp_liquid_profit_accum,
-        "real_profit_accum": cmp_real_profit_accum,
+        # Las tres series acumuladas del gráfico son saldos y comparten la
+        # misma base real de apertura mensual.
+        "calc_accum": cmp_calc_balance,
+        "liquid_profit_accum": cmp_liquid_balance,
+        "real_profit_accum": cmp_real_balance,
+        "reserved_markers": cmp_reserved_markers,
     }
     cmp_json = json.dumps(cmp_payload, ensure_ascii=False)
 
@@ -732,7 +884,10 @@ def dashboard_finanzas():
         return ars(value)
 
     def _cmp_tr(r):
+        calc_html = _fmt_or_dash(r["calc"])
+        calc_accum_html = _fmt_or_dash(r["calc_accum"])
         liquid_profit_html = _fmt_or_dash(r["liquid_profit"])
+        liquid_profit_accum_html = _fmt_or_dash(r["liquid_profit_accum"])
         real_profit_html = _fmt_or_dash(r["real_profit"])
         real_profit_accum_html = _fmt_or_dash(r["real_profit_accum"])
 
@@ -744,10 +899,10 @@ def dashboard_finanzas():
         return (
             "<tr>"
             f"<td>{r['date_ar']}</td>"
-            f"<td class='num' style='color:#2563eb; font-weight:800;'>{ars(r['calc'])}</td>"
-            f"<td class='num' style='color:#2563eb; font-weight:700;'>{ars(r['calc_accum'])}</td>"
+            f"<td class='num' style='color:#2563eb; font-weight:800;'>{calc_html}</td>"
+            f"<td class='num' style='color:#2563eb; font-weight:700;'>{calc_accum_html}</td>"
             f"<td class='num' style='color:#7c3aed; font-weight:800;'>{liquid_profit_html}</td>"
-            f"<td class='num' style='color:#7c3aed; font-weight:700;'>{ars(r['liquid_profit_accum'])}</td>"
+            f"<td class='num' style='color:#7c3aed; font-weight:700;'>{liquid_profit_accum_html}</td>"
             f"<td class='num' style='color:#16a34a; font-weight:800;'>{real_profit_html}</td>"
             f"<td class='num' style='color:#16a34a; font-weight:700;'>{real_profit_accum_html}</td>"
             f"<td class='num'>{desfasaje_html}</td>"
@@ -820,7 +975,7 @@ def dashboard_finanzas():
 
       <div class="card kpi blue">
         <div class="label">Ganancia calculada acumulada</div>
-        <div class="value">{ars(cmp_calc_accum[-1] if cmp_calc_accum else 0.0)}</div>
+        <div class="value">{ars(latest_calc_result)}</div>
         <div class="muted">
           Ventas menos gastos y menos {APPS_RETENTION_FACTOR * 100:.1f}% estimado
           sobre ventas de PY + Rappi
@@ -830,7 +985,7 @@ def dashboard_finanzas():
       <div class="card kpi" style="background:rgba(22,163,74,.17); border-color:rgba(22,163,74,.34);">
         <div class="label">Ganancia real acumulada</div>
         <div class="value">{ars(latest_real_accum) if latest_real_accum is not None else "—"}</div>
-        <div class="muted">Liquidez real atribuible al mes</div>
+        <div class="muted">Variación del saldo real disponible desde la apertura del mes</div>
       </div>
 
       <!-- Fila 2 -->
@@ -843,7 +998,7 @@ def dashboard_finanzas():
       <div class="card kpi" style="{margin_card_style}">
         <div class="margen-kpi">
           <div class="margen-left">
-            <div class="label">Margen</div>
+            <div class="label">Margen Calculado</div>
             <div class="value">{(f"{margen_periodo:.1f}%" if margen_periodo is not None else "—")}</div>
             <div style="margin-top:6px;"><span class="{bucket_class}">{bucket_label}</span></div>
           </div>
@@ -859,8 +1014,8 @@ def dashboard_finanzas():
 
       <div class="card kpi" style="background:rgba(124,58,237,.13); border-color:rgba(124,58,237,.30);">
         <div class="label">Ganancia líquida acumulada</div>
-        <div class="value">{ars(cmp_liquid_profit_accum[-1] if cmp_liquid_profit_accum else 0.0)}</div>
-        <div class="muted">Saldo esperado al cierre menos fondos reservados</div>
+        <div class="value">{ars(latest_liquid_result)}</div>
+        <div class="muted">Variación acumulada de liquidez disponible del mes</div>
       </div>
 
       <div class="card kpi" style="background:rgba(244,63,94,.11); border-color:rgba(244,63,94,.27);">
@@ -871,15 +1026,45 @@ def dashboard_finanzas():
 
       <!-- Fila 3 -->
       <div class="card kpi">
-        <div class="label">Cobro por Apps (próximo viernes)</div>
-        <div class="value">{ars(apps_a_cobrar_estimado)}</div>
-        <div class="muted">Período: {periodo_cobro_str}</div>
-      </div>
-
-      <div class="card kpi">
         <div class="label">Fondos reservados disponibles</div>
         <div class="value">{ars(latest_reserved_funds)}</div>
-        <div class="muted">Saldo anterior + agregados - consumos</div>
+        <div class="muted">Saldo persistente; cambia solo con una modificación explícita</div>
+      </div>
+
+      <div class="card kpi" style="{liquid_margin_card_style}">
+        <div class="margen-kpi">
+          <div class="margen-left">
+            <div class="label">Margen Líquido</div>
+            <div class="value">{(f"{margen_liquido:.1f}%" if margen_liquido is not None else "—")}</div>
+            <div style="margin-top:6px;"><span class="{liquid_bucket_class}">{liquid_bucket_label}</span></div>
+          </div>
+
+          <div class="margen-right">
+            <div class="muted">Ref.</div>
+            <span class="pill bad">Malo ≤ 10</span>
+            <span class="pill warn">Regular &lt; 20</span>
+            <span class="pill ok">Bueno ≥ 20</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card kpi" style="background:rgba(107,114,128,.08); border-color:rgba(107,114,128,.20);">
+        <div class="label">Brecha explicada acumulada</div>
+        <div class="value">{ars(accumulated_reconciliation["explained_gap"]) if accumulated_reconciliation["explained_gap"] is not None else "—"}</div>
+        <div class="muted">
+          Apps: {ars(accumulated_reconciliation["apps_effect"])} ·
+          Caja: {ars(accumulated_reconciliation["operating_cash_change"]) if accumulated_reconciliation["operating_cash_change"] is not None else "—"} ·
+          Reservas: {ars(accumulated_reconciliation["reserve_change"])}
+        </div>
+      </div>
+
+      <div class="card kpi" style="{accumulated_reconciliation_style}">
+        <div class="label">Desfase no explicado acumulado</div>
+        <div class="value">{ars(accumulated_reconciliation["unexplained_gap"]) if accumulated_reconciliation["unexplained_gap"] is not None else "—"}</div>
+        <div class="muted" style="display:flex; gap:7px; align-items:center; flex-wrap:wrap;">
+          <span class="{accumulated_reconciliation_status['class']}">{accumulated_reconciliation_status['label']}</span>
+          <span>{accumulated_unexplained_pct_text} de los ingresos líquidos</span>
+        </div>
       </div>
     </div>
 
@@ -944,7 +1129,7 @@ def dashboard_finanzas():
       <div class="chartbox monthly-chartbox"><canvas id="monthlyBarChart"></canvas></div>
       <p class="muted" style="margin-top:10px;">
         Ingresos líquidos = Apps cobradas + Mercado Pago diario + efectivo retirado.
-        La barra violeta muestra la ganancia líquida acumulada al cierre de cada mes, con la misma lógica que el KPI superior.
+        La barra violeta muestra la variación mensual de liquidez disponible e incluye altas o liberaciones de fondos reservados.
         El porcentaje sobre cada grupo representa ganancia líquida / ingresos líquidos.
       </p>
     </div>
@@ -953,7 +1138,7 @@ def dashboard_finanzas():
       <h3>Bloque 5 · Control: Ganancia Calculada, Líquida y Real</h3>
       <div class="chartbox"><canvas id="profitCompareChart"></canvas></div>
       <p class="muted" style="margin-top:10px;">
-        Azul = ganancia calculada ajustada (ventas - gastos - retención estimada de apps). Violeta sólido = ganancia líquida diaria. Violeta punteado = saldo esperado al cierre descontando solo la reserva aún disponible. Verde sólido = ganancia real cargada manualmente. Verde punteado = liquidez real atribuible al mes.
+        Las tres líneas punteadas usan como base la liquidez real disponible al cierre del mes anterior. Azul = Ganancia Calculada Acumulada. Violeta = Liquidez Acumulada. Verde = Ganancia Real Acumulada. Solo se muestran fechas con datos efectivamente cargados; no se prolongan valores sobre días vacíos. El primer punto gris de cada mes muestra el saldo vigente de fondos reservados; luego solo se marcan sus modificaciones explícitas.
       </p>
 
       <div style="height:10px;"></div>
@@ -963,11 +1148,11 @@ def dashboard_finanzas():
           <tr>
             <th>Fecha</th>
             <th class="num">Calculada</th>
-            <th class="num">Calc.<br>Acum.</th>
+            <th class="num">Saldo<br>Calc.</th>
             <th class="num">Líquida</th>
-            <th class="num">Líq.<br>Acum.</th>
+            <th class="num">Saldo<br>Líq.</th>
             <th class="num">Real</th>
-            <th class="num">Real<br>Acum.</th>
+            <th class="num">Saldo<br>Real</th>
             <th class="num">Desf.<br>%</th>
           </tr>
         </thead>
@@ -1344,7 +1529,7 @@ def dashboard_finanzas():
                 pointBackgroundColor: colorRealProfit
               }},
               {{
-                label: 'Ganancia Calculada Ajustada Acumulada',
+                label: 'Ganancia Calculada Acumulada',
                 data: profitCmp.calc_accum,
                 tension: 0.2,
                 fill: false,
@@ -1357,7 +1542,7 @@ def dashboard_finanzas():
                 pointBackgroundColor: colorCalc
               }},
               {{
-                label: 'Liquidez Esperada Comparable',
+                label: 'Liquidez Acumulada',
                 data: profitCmp.liquid_profit_accum,
                 tension: 0.2,
                 fill: false,
@@ -1370,7 +1555,7 @@ def dashboard_finanzas():
                 pointBackgroundColor: colorLiquidProfit
               }},
               {{
-                label: 'Liquidez Real del Mes',
+                label: 'Ganancia Real Acumulada',
                 data: profitCmp.real_profit_accum,
                 tension: 0.2,
                 fill: false,
@@ -1381,6 +1566,18 @@ def dashboard_finanzas():
                 borderColor: colorRealProfit,
                 backgroundColor: colorRealProfit,
                 pointBackgroundColor: colorRealProfit
+              }}
+              ,{{
+                label: 'Fondos reservados',
+                data: profitCmp.reserved_markers,
+                showLine: false,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                spanGaps: false,
+                borderColor: '#9ca3af',
+                backgroundColor: '#9ca3af',
+                pointBackgroundColor: '#9ca3af',
+                pointBorderColor: '#6b7280'
               }}
             ]
           }},

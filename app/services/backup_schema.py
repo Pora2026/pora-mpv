@@ -7,7 +7,7 @@ from app.models import BusinessDay, ExpenseCategory, ExpenseEntry, ShiftRecord, 
 
 
 BACKUP_FORMAT = "pora-caja-backup"
-CURRENT_FORMAT_VERSION = 1
+CURRENT_FORMAT_VERSION = 3
 
 # Registro explícito de las tablas que forman parte del backup.
 # El orden también será útil para una futura restauración.

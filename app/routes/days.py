@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from flask import Blueprint, request, redirect, url_for, flash
 from flask_login import login_required
 from sqlalchemy import func
@@ -9,8 +11,11 @@ from app.utils.dates import is_sunday, parse_ymd, fmt_date_ar
 from app.services.finance_service import (
     compute_expected_cash_balance,
     compute_cash_difference,
-    compute_comparable_liquid_balance,
-    compute_reserved_funds_series,
+    compute_available_liquidity_change,
+    compute_reserved_funds_change,
+    resolve_reserved_funds_balance,
+    compute_calc_liquid_reconciliation,
+    compute_reconciliation_status,
 )
 
 
@@ -27,12 +32,64 @@ def _money_input(v):
 
 
 def _daily_liquidity(bday):
-    """Liquidez ingresada durante el día, antes de gastos y retiros."""
+    """Liquidez ingresada durante el día, antes de gastos y reservas."""
     return (
         float(getattr(bday, "daily_mercadopago", 0.0) or 0.0)
         + float(getattr(bday, "daily_cash_withdrawn", 0.0) or 0.0)
         + float(getattr(bday, "real_apps_collected", 0.0) or 0.0)
     )
+
+
+def _last_reserved_change_before(day):
+    return (
+        BusinessDay.query
+        .filter(BusinessDay.day < day)
+        .filter(BusinessDay.reserved_funds_balance.isnot(None))
+        .order_by(BusinessDay.day.desc())
+        .first()
+    )
+
+
+def _reserved_funds_before(day):
+    previous_change = _last_reserved_change_before(day)
+    if previous_change is None:
+        return 0.0
+    return max(
+        float(getattr(previous_change, "reserved_funds_balance", 0.0) or 0.0),
+        0.0,
+    )
+
+
+def _reserved_funds_context(bday):
+    previous_reserved = _reserved_funds_before(bday.day)
+    explicit_reserved = getattr(bday, "reserved_funds_balance", None)
+    effective_reserved = resolve_reserved_funds_balance(
+        previous_reserved,
+        explicit_reserved,
+    )
+    reserve_change = compute_reserved_funds_change(
+        previous_reserved,
+        effective_reserved,
+    )
+    return previous_reserved, effective_reserved, reserve_change
+
+
+def _operating_cash_context(bday):
+    """Caja operativa al cierre anterior y al cierre del día actual."""
+
+    previous_day = (
+        BusinessDay.query
+        .filter(BusinessDay.day < bday.day)
+        .order_by(BusinessDay.day.desc())
+        .first()
+    )
+    previous_balance = (
+        getattr(previous_day, "operating_cash_balance", None)
+        if previous_day is not None
+        else None
+    )
+    current_balance = getattr(bday, "operating_cash_balance", None)
+    return previous_balance, current_balance
 
 
 def _recalculate_cash_fields(bday, day_totals_fn):
@@ -43,11 +100,12 @@ def _recalculate_cash_fields(bday, day_totals_fn):
     agregar o eliminar gastos, para evitar saldos esperados desactualizados.
     """
     totals = day_totals_fn(bday)
+    _, _, reserve_change = _reserved_funds_context(bday)
     expected_cash = compute_expected_cash_balance(
         opening_balance=getattr(bday, "opening_cash_balance", None),
         cash_income=_daily_liquidity(bday),
         paid_expenses=totals["expense_total"],
-        safe_box_transfer=getattr(bday, "safe_box_transfer", None),
+        reserved_funds_change=reserve_change,
     )
 
     bday.expected_cash_balance = expected_cash
@@ -224,17 +282,56 @@ def edit_day(day):
         real_digital = 0.0 if getattr(bday, "real_profit", None) is not None else None
 
     daily_liquidity = _daily_liquidity(bday)
-    
-    net_daily_liquidity = (
-        daily_liquidity
-        - float(totals["expense_total"] or 0.0)
+
+    previous_reserved_funds, fondos_reservados_disponibles, reserve_change = (
+        _reserved_funds_context(bday)
     )
-    
+
+    net_daily_liquidity = compute_available_liquidity_change(
+        cash_income=daily_liquidity,
+        paid_expenses=totals["expense_total"],
+        previous_reserved_funds=previous_reserved_funds,
+        current_reserved_funds=fondos_reservados_disponibles,
+    )
+
+    previous_operating_cash, current_operating_cash = _operating_cash_context(bday)
+
+    daily_reconciliation = compute_calc_liquid_reconciliation(
+        calculated_profit=float(
+            totals.get("profit_adjusted", totals["profit"]) or 0.0
+        ),
+        liquid_profit=net_daily_liquidity,
+        apps_gross=getattr(bday, "real_apps_pending", None),
+        apps_collected=getattr(bday, "real_apps_collected", None),
+        previous_operating_cash=previous_operating_cash,
+        current_operating_cash=current_operating_cash,
+        previous_reserved_funds=previous_reserved_funds,
+        current_reserved_funds=fondos_reservados_disponibles,
+    )
+    daily_reconciliation_status = compute_reconciliation_status(
+        daily_reconciliation["unexplained_gap"],
+        daily_liquidity,
+    )
+
+    reconciliation_card_style = ""
+    if daily_reconciliation_status["label"] == "Aceptable":
+        reconciliation_card_style = "background:rgba(22,163,74,.10); border-color:rgba(22,163,74,.24);"
+    elif daily_reconciliation_status["label"] == "Medio":
+        reconciliation_card_style = "background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.30);"
+    elif daily_reconciliation_status["label"] == "Riesgoso":
+        reconciliation_card_style = "background:rgba(220,38,38,.10); border-color:rgba(220,38,38,.25);"
+
+    unexplained_pct_text = (
+        "—"
+        if daily_reconciliation_status["pct"] is None
+        else f'{daily_reconciliation_status["pct"]:.1f}%'
+    )
+
     expected_cash = compute_expected_cash_balance(
         opening_balance=getattr(bday, "opening_cash_balance", None),
         cash_income=daily_liquidity,
         paid_expenses=totals["expense_total"],
-        safe_box_transfer=getattr(bday, "safe_box_transfer", None),
+        reserved_funds_change=reserve_change,
     )
 
     real_cash_difference = compute_cash_difference(
@@ -257,8 +354,9 @@ def edit_day(day):
         else "expense"
     )
 
-    # Acumulados mensuales. Las curvas parten de cero y los fondos que
-    # existían al comenzar el mes se controlan por separado.
+    # Saldos acumulados del mes. Deben coincidir exactamente con las tres
+    # curvas acumuladas del dashboard: todas parten de la misma base real
+    # disponible al cierre del mes anterior.
     month_start = bday.day.replace(day=1)
 
     period_days = (
@@ -269,94 +367,125 @@ def edit_day(day):
         .all()
     )
 
-    ganancia_calculada_acumulada = 0.0
-    ganancia_liquida_acumulada = 0.0
-    fondos_iniciales_mes = 0.0
-    fondos_reservados_disponibles = 0.0
-    reserve_movements = []
+    previous_month_close = (
+        BusinessDay.query
+        .filter(BusinessDay.day < month_start)
+        .filter(BusinessDay.actual_cash_balance.isnot(None))
+        .order_by(BusinessDay.day.desc())
+        .first()
+    )
 
-    if period_days:
-        fondos_iniciales_mes = float(
+    if previous_month_close is not None:
+        base_real_mes = float(previous_month_close.actual_cash_balance or 0.0)
+    elif period_days:
+        base_real_mes = float(
             getattr(period_days[0], "opening_cash_balance", 0.0) or 0.0
         )
-
-        for dia_periodo in period_days:
-            if is_sunday(dia_periodo.day):
-                continue
-
-            ensure_shifts(dia_periodo)
-            recalc_day_status(dia_periodo)
-
-            totales_periodo = day_totals(dia_periodo)
-
-            ganancia_calculada_dia = float(
-                totales_periodo.get("profit_adjusted", totales_periodo["profit"]) or 0.0
-            )
-
-            has_liquid_data_periodo = (
-                getattr(dia_periodo, "daily_mercadopago", None) is not None
-                or getattr(dia_periodo, "daily_cash_withdrawn", None) is not None
-                or getattr(dia_periodo, "real_apps_collected", None) is not None
-            )
-
-            liquidez_diaria_periodo = (
-                float(getattr(dia_periodo, "daily_mercadopago", 0.0) or 0.0)
-                + float(getattr(dia_periodo, "daily_cash_withdrawn", 0.0) or 0.0)
-                + float(getattr(dia_periodo, "real_apps_collected", 0.0) or 0.0)
-            )
-
-            ganancia_liquida_dia = (
-                liquidez_diaria_periodo
-                - float(totales_periodo["expense_total"] or 0.0)
-                if has_liquid_data_periodo
-                else 0.0
-            )
-
-            ganancia_calculada_acumulada += ganancia_calculada_dia
-
-            reserve_movements.append(
-                {
-                    "net_liquidity": ganancia_liquida_dia,
-                    "reserve_addition": max(
-                        float(
-                            getattr(dia_periodo, "safe_box_transfer", 0.0)
-                            or 0.0
-                        ),
-                        0.0,
-                    ),
-                    "actual_balance": getattr(
-                        dia_periodo,
-                        "actual_cash_balance",
-                        None,
-                    ),
-                }
-            )
-
-        if reserve_movements:
-            allocation_state = compute_reserved_funds_series(
-                fondos_iniciales_mes,
-                reserve_movements,
-            )[-1]
-            fondos_reservados_disponibles = allocation_state[
-                "reserve_available"
-            ]
-        else:
-            allocation_state = None
-            fondos_reservados_disponibles = fondos_iniciales_mes
     else:
-        allocation_state = None
+        base_real_mes = 0.0
 
-    ganancia_liquida_acumulada = compute_comparable_liquid_balance(
-        expected_cash,
-        fondos_reservados_disponibles,
-    )
+    calc_result_running = 0.0
+    liquid_result_running = 0.0
+    ganancia_calculada_acumulada = base_real_mes
+    ganancia_liquida_acumulada = base_real_mes
 
+    running_reserved_funds = _reserved_funds_before(month_start)
+
+    for dia_periodo in period_days:
+        if is_sunday(dia_periodo.day):
+            continue
+
+        ensure_shifts(dia_periodo)
+        recalc_day_status(dia_periodo)
+        totales_periodo = day_totals(dia_periodo)
+
+        expense_periodo = float(totales_periodo["expense_total"] or 0.0)
+        has_calc_data = (
+            abs(float(totales_periodo["income"] or 0.0)) > 1e-9
+            or abs(expense_periodo) > 1e-9
+            or getattr(dia_periodo, "real_apps_pending", None) is not None
+        )
+
+        if has_calc_data:
+            ganancia_calculada_dia = float(
+                totales_periodo.get(
+                    "profit_adjusted",
+                    totales_periodo["profit"],
+                )
+                or 0.0
+            )
+            calc_result_running += ganancia_calculada_dia
+            ganancia_calculada_acumulada = (
+                base_real_mes + calc_result_running
+            )
+
+        liquidez_diaria_periodo = (
+            float(getattr(dia_periodo, "daily_mercadopago", 0.0) or 0.0)
+            + float(getattr(dia_periodo, "daily_cash_withdrawn", 0.0) or 0.0)
+            + float(getattr(dia_periodo, "real_apps_collected", 0.0) or 0.0)
+        )
+
+        explicit_reserved = getattr(
+            dia_periodo,
+            "reserved_funds_balance",
+            None,
+        )
+        current_reserved_funds = resolve_reserved_funds_balance(
+            running_reserved_funds,
+            explicit_reserved,
+        )
+
+        has_liquid_activity = (
+            getattr(dia_periodo, "daily_mercadopago", None) is not None
+            or getattr(dia_periodo, "daily_cash_withdrawn", None) is not None
+            or getattr(dia_periodo, "real_apps_collected", None) is not None
+            or explicit_reserved is not None
+            or abs(expense_periodo) > 1e-9
+        )
+
+        if has_liquid_activity:
+            ganancia_liquida_dia_periodo = compute_available_liquidity_change(
+                cash_income=liquidez_diaria_periodo,
+                paid_expenses=expense_periodo,
+                previous_reserved_funds=running_reserved_funds,
+                current_reserved_funds=current_reserved_funds,
+            )
+
+            # Igual que en el dashboard, la acumulada violeta parte de la base
+            # real del cierre anterior y luego suma únicamente movimientos de
+            # liquidez. No toma como nueva base los saldos reales intermedios.
+            liquid_result_running += ganancia_liquida_dia_periodo
+            ganancia_liquida_acumulada = (
+                base_real_mes + liquid_result_running
+            )
+
+        running_reserved_funds = current_reserved_funds
+
+    fondos_reservados_disponibles = running_reserved_funds
+
+    # La curva verde acumulada representa directamente la liquidez real
+    # disponible contada al cierre del día.
     ganancia_real_acumulada_mes = (
-        allocation_state["real_month_available"]
-        if allocation_state is not None
-        and getattr(bday, "actual_cash_balance", None) is not None
+        float(bday.actual_cash_balance)
+        if getattr(bday, "actual_cash_balance", None) is not None
         else None
     )
+
+    reserve_explicit_value = getattr(bday, "reserved_funds_balance", None)
+    reserve_placeholder_value = ars(previous_reserved_funds)
+    reserve_changed_at = getattr(bday, "reserved_funds_changed_at", None)
+    if reserve_explicit_value is None:
+        reserve_help = (
+            f"Sin cambio hoy: se mantienen {ars(fondos_reservados_disponibles)}. "
+            "Cargá el saldo total si cambia; escribí 0 para liberar todo."
+        )
+    elif reserve_changed_at is not None:
+        reserve_help = (
+            f"Modificación explícita registrada el "
+            f"{reserve_changed_at.strftime('%d/%m/%Y %H:%M')}."
+        )
+    else:
+        reserve_help = "Modificación explícita del saldo total reservado para este día."
 
     body = f"""
     <h1>Editar día {fmt_date_ar(bday.day)}</h1>
@@ -438,13 +567,23 @@ def edit_day(day):
             </div>
 
             <div>
-              <label>Agregar a fondos reservados</label>
-              <input name="cash_transfer_out" value="{_money_input(getattr(bday, 'safe_box_transfer', None))}" placeholder="Ej: 100000" />
-              <div class="muted">Transferencia interna: no reduce la liquidez real total.</div>
+              <label>Fondos reservados (saldo vigente)</label>
+              <input name="reserved_funds_balance"
+                     value="{_money_input(reserve_explicit_value)}"
+                     placeholder="{reserve_placeholder_value}" />
+              <div class="muted">{reserve_help}</div>
             </div>
 
             <div>
-              <label>Liquidez Real Total (plata contada)</label>
+              <label>Caja operativa al cierre</label>
+              <input name="operating_cash_balance"
+                     value="{_money_input(getattr(bday, 'operating_cash_balance', None))}"
+                     placeholder="Ej: 23670" />
+              <div class="muted">Fondo de cambio del local. Existe, pero no se considera liquidez disponible.</div>
+            </div>
+
+            <div>
+              <label>Liquidez real disponible (plata contada)</label>
               <input name="cash_real_balance" value="{_money_input(getattr(bday, 'actual_cash_balance', None))}" placeholder="Ej: 145000" />
             </div>
         </div>
@@ -585,7 +724,7 @@ def edit_day(day):
         <div class="value">{ars(ganancia_calculada_acumulada)}</div>
 
         <div class="muted">
-          Acumulado del mes; comienza en cero
+          Saldo calculado proyectado desde la base real de apertura del mes
         </div>       
     </div>        
       
@@ -597,29 +736,30 @@ def edit_day(day):
       <div class="kpi profit" style="padding:14px;">
         <div class="label">Ganancia líquida</div>
         <div class="value">{ars(net_daily_liquidity)}</div>
+        <div class="muted">Incluye altas o liberaciones de fondos reservados</div>
       </div>
 
     <div class="kpi profit" style="padding:14px;">
 
-        <div class="label">Ganancia líquida acumulada</div>
+        <div class="label">Liquidez acumulada</div>
 
         <div class="value">
             {ars(ganancia_liquida_acumulada)}
         </div>
 
         <div class="muted">
-          Saldo esperado al cierre menos fondos reservados disponibles
+          Base real de apertura + suma de ganancias líquidas diarias del mes
         </div>
 
       </div>
 
       <div class="kpi income" style="padding:14px;">
-        <div class="label">Liquidez real atribuible al mes</div>
+        <div class="label">Ganancia real acumulada</div>
         <div class="value">
           {ars(ganancia_real_acumulada_mes) if ganancia_real_acumulada_mes is not None else "—"}
         </div>
         <div class="muted">
-          Liquidez real total descontando solo la reserva aún disponible
+          Liquidez real disponible contada al cierre del día
         </div>
       </div>
 
@@ -627,7 +767,26 @@ def edit_day(day):
         <div class="label">Fondos reservados disponibles</div>
         <div class="value">{ars(fondos_reservados_disponibles)}</div>
         <div class="muted">
-          Se consume primero; solo aumenta con agregados manuales
+          Saldo persistente; solo cambia cuando lo modificás explícitamente
+        </div>
+      </div>
+
+      <div class="kpi" style="padding:14px; background:rgba(107,114,128,.08); border:1px solid rgba(107,114,128,.20);">
+        <div class="label">Brecha explicada</div>
+        <div class="value">{ars(daily_reconciliation["explained_gap"]) if daily_reconciliation["explained_gap"] is not None else "—"}</div>
+        <div class="muted">
+          Apps: {ars(daily_reconciliation["apps_effect"])} ·
+          Caja: {ars(daily_reconciliation["operating_cash_change"]) if daily_reconciliation["operating_cash_change"] is not None else "—"} ·
+          Reservas: {ars(daily_reconciliation["reserve_change"])}
+        </div>
+      </div>
+
+      <div class="kpi" style="padding:14px; {reconciliation_card_style}">
+        <div class="label">Desfase no explicado</div>
+        <div class="value">{ars(daily_reconciliation["unexplained_gap"]) if daily_reconciliation["unexplained_gap"] is not None else "—"}</div>
+        <div class="muted" style="display:flex; gap:7px; align-items:center; flex-wrap:wrap;">
+          <span class="{daily_reconciliation_status['class']}">{daily_reconciliation_status['label']}</span>
+          <span>{unexplained_pct_text} de la liquidez ingresada</span>
         </div>
       </div>
     </div>
@@ -670,7 +829,8 @@ def save_day(day):
     mercadopago_raw = (request.form.get("daily_mercadopago") or "").strip()
     withdrawn_raw = (request.form.get("daily_cash_withdrawn") or "").strip()
     opening_raw = (request.form.get("cash_opening_balance") or "").strip()
-    transfer_raw = (request.form.get("cash_transfer_out") or "").strip()
+    reserved_funds_raw = (request.form.get("reserved_funds_balance") or "").strip()
+    operating_cash_raw = (request.form.get("operating_cash_balance") or "").strip()
     real_balance_raw = (request.form.get("cash_real_balance") or "").strip()
     bday.real_apps_collected = None if apps_collected_raw == "" else safe_float(apps_collected_raw)
     bday.daily_mercadopago = None if mercadopago_raw == "" else safe_float(mercadopago_raw)
@@ -680,12 +840,37 @@ def save_day(day):
     bday.real_digital_profit = None if digital_raw == "" else safe_float(digital_raw)
     bday.real_apps_pending = None if apps_raw == "" else safe_float(apps_raw)
     bday.opening_cash_balance = None if opening_raw == "" else safe_float(opening_raw)
-    reserve_addition = None if transfer_raw == "" else safe_float(transfer_raw)
-    if reserve_addition is not None and reserve_addition < 0:
-        flash("El agregado a fondos reservados no puede ser negativo.", "error")
+    bday.operating_cash_balance = (
+        None if operating_cash_raw == "" else safe_float(operating_cash_raw)
+    )
+    if bday.operating_cash_balance is not None and bday.operating_cash_balance < 0:
+        flash("La caja operativa no puede ser negativa.", "error")
         return redirect(url_for("days_bp.edit_day", day=day))
 
-    bday.safe_box_transfer = reserve_addition
+    old_reserved_explicit = getattr(bday, "reserved_funds_balance", None)
+    new_reserved_explicit = (
+        None
+        if reserved_funds_raw == ""
+        else safe_float(reserved_funds_raw)
+    )
+    if new_reserved_explicit is not None and new_reserved_explicit < 0:
+        flash("Los fondos reservados no pueden ser negativos.", "error")
+        return redirect(url_for("days_bp.edit_day", day=day))
+
+    if new_reserved_explicit is None:
+        # Vacío significa que ese día no modifica el estado del fondo.
+        bday.reserved_funds_balance = None
+        bday.reserved_funds_changed_at = None
+    else:
+        changed = (
+            old_reserved_explicit is None
+            or abs(float(old_reserved_explicit) - float(new_reserved_explicit)) > 1e-9
+        )
+        bday.reserved_funds_balance = new_reserved_explicit
+        if changed or getattr(bday, "reserved_funds_changed_at", None) is None:
+            bday.reserved_funds_changed_at = datetime.utcnow()
+
+    # ``safe_box_transfer`` queda intacto como dato legacy.
     bday.actual_cash_balance = None if real_balance_raw == "" else safe_float(real_balance_raw)
 
     if (

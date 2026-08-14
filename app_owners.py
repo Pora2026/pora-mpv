@@ -198,6 +198,18 @@ def ensure_schema():
             ))
 
             db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS reserved_funds_balance DOUBLE PRECISION;"
+            ))
+
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS reserved_funds_changed_at TIMESTAMP WITHOUT TIME ZONE;"
+            ))
+
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS operating_cash_balance DOUBLE PRECISION;"
+            ))
+
+            db.session.execute(text(
                 "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS daily_mercadopago DOUBLE PRECISION;"
             ))
 
@@ -279,6 +291,21 @@ def ensure_schema():
         if "safe_box_transfer" not in existing:
             db.session.execute(text(
                 "ALTER TABLE business_days ADD COLUMN safe_box_transfer REAL;"
+            ))
+
+        if "reserved_funds_balance" not in existing:
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN reserved_funds_balance REAL;"
+            ))
+
+        if "reserved_funds_changed_at" not in existing:
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN reserved_funds_changed_at DATETIME;"
+            ))
+
+        if "operating_cash_balance" not in existing:
+            db.session.execute(text(
+                "ALTER TABLE business_days ADD COLUMN operating_cash_balance REAL;"
             ))
 
         if "daily_mercadopago" not in existing:

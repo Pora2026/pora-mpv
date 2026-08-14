@@ -47,9 +47,23 @@ class BusinessDay(db.Model):
     # diferencia entre esperado y real
     cash_difference = db.Column(db.Float, nullable=True)
 
-    # transferencia a caja fuerte
+    # transferencia a caja fuerte (legacy)
+    # Se conserva para no reinterpretar movimientos históricos.
     safe_box_transfer = db.Column(db.Float, nullable=True)
+
+    # saldo explícito de fondos reservados.
+    # NULL = ese día no se modificó el fondo; se hereda el último valor.
+    # 0 = el fondo fue liberado/agotado explícitamente.
+    reserved_funds_balance = db.Column(db.Float, nullable=True)
+
+    # momento en que se modificó explícitamente reserved_funds_balance
+    reserved_funds_changed_at = db.Column(db.DateTime, nullable=True)
     
+    # efectivo que queda inmovilizado como fondo de cambio al cierre del día.
+    # No forma parte de la liquidez disponible de tesorería; se utiliza para
+    # conciliar la ganancia calculada con la liquidez.
+    operating_cash_balance = db.Column(db.Float, nullable=True)
+
     # liquidez diaria consolidada
     daily_mercadopago = db.Column(db.Float, nullable=True)
 
