@@ -10,6 +10,9 @@ SQLITE_URI = "sqlite:///" + DB_PATH
 
 class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-change-me")
+    CAJA_SYNC_TOKEN = os.environ.get("CAJA_SYNC_TOKEN")
+    # Protección histórica: CAJA sólo puede sincronizar desde esta fecha.
+    CAJA_SYNC_START_DATE = os.environ.get("CAJA_SYNC_START_DATE", "2026-08-13")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     DATABASE_URL = os.environ.get("DATABASE_URL")
