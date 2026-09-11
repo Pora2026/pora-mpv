@@ -296,37 +296,6 @@ def edit_day(day):
 
     previous_operating_cash, current_operating_cash = _operating_cash_context(bday)
 
-    daily_reconciliation = compute_calc_liquid_reconciliation(
-        calculated_profit=float(
-            totals.get("profit_adjusted", totals["profit"]) or 0.0
-        ),
-        liquid_profit=net_daily_liquidity,
-        apps_gross=getattr(bday, "real_apps_pending", None),
-        apps_collected=getattr(bday, "real_apps_collected", None),
-        previous_operating_cash=previous_operating_cash,
-        current_operating_cash=current_operating_cash,
-        previous_reserved_funds=previous_reserved_funds,
-        current_reserved_funds=fondos_reservados_disponibles,
-    )
-    daily_reconciliation_status = compute_reconciliation_status(
-        daily_reconciliation["unexplained_gap"],
-        daily_liquidity,
-    )
-
-    reconciliation_card_style = ""
-    if daily_reconciliation_status["label"] == "Aceptable":
-        reconciliation_card_style = "background:rgba(22,163,74,.10); border-color:rgba(22,163,74,.24);"
-    elif daily_reconciliation_status["label"] == "Medio":
-        reconciliation_card_style = "background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.30);"
-    elif daily_reconciliation_status["label"] == "Riesgoso":
-        reconciliation_card_style = "background:rgba(220,38,38,.10); border-color:rgba(220,38,38,.25);"
-
-    unexplained_pct_text = (
-        "—"
-        if daily_reconciliation_status["pct"] is None
-        else f'{daily_reconciliation_status["pct"]:.1f}%'
-    )
-
     expected_cash = compute_expected_cash_balance(
         opening_balance=getattr(bday, "opening_cash_balance", None),
         cash_income=daily_liquidity,
@@ -389,7 +358,26 @@ def edit_day(day):
     ganancia_calculada_acumulada = base_real_mes
     ganancia_liquida_acumulada = base_real_mes
 
-    running_reserved_funds = _reserved_funds_before(month_start)
+    # La conciliación acumulada debe usar componentes acumulados del mismo
+    # período. Si se compara una brecha acumulada contra explicaciones sólo
+    # del día seleccionado, se mezclan magnitudes de distinto alcance.
+    month_open_reserved_funds = _reserved_funds_before(month_start)
+    running_reserved_funds = month_open_reserved_funds
+
+    previous_month_day = (
+        BusinessDay.query
+        .filter(BusinessDay.day < month_start)
+        .order_by(BusinessDay.day.desc())
+        .first()
+    )
+    month_open_operating_cash = (
+        getattr(previous_month_day, "operating_cash_balance", None)
+        if previous_month_day is not None
+        else None
+    )
+
+    apps_gross_acumulado = 0.0
+    apps_collected_acumulado = 0.0
 
     for dia_periodo in period_days:
         if is_sunday(dia_periodo.day):
@@ -400,6 +388,14 @@ def edit_day(day):
         totales_periodo = day_totals(dia_periodo)
 
         expense_periodo = float(totales_periodo["expense_total"] or 0.0)
+
+        apps_gross_acumulado += float(
+            getattr(dia_periodo, "real_apps_pending", 0.0) or 0.0
+        )
+        apps_collected_acumulado += float(
+            getattr(dia_periodo, "real_apps_collected", 0.0) or 0.0
+        )
+
         has_calc_data = (
             abs(float(totales_periodo["income"] or 0.0)) > 1e-9
             or abs(expense_periodo) > 1e-9
@@ -462,6 +458,40 @@ def edit_day(day):
         running_reserved_funds = current_reserved_funds
 
     fondos_reservados_disponibles = running_reserved_funds
+
+    # Conciliación acumulada al día seleccionado. La brecha Calculado vs
+    # Líquido y sus tres explicaciones (Apps, caja operativa y reservas) se
+    # calculan sobre exactamente el mismo período: desde el inicio del mes
+    # hasta el día seleccionado. De esta manera el residual puede ser cero,
+    # pero sólo cuando la brecha realmente queda explicada.
+    daily_reconciliation = compute_calc_liquid_reconciliation(
+        calculated_profit=ganancia_calculada_acumulada,
+        liquid_profit=ganancia_liquida_acumulada,
+        apps_gross=apps_gross_acumulado,
+        apps_collected=apps_collected_acumulado,
+        previous_operating_cash=month_open_operating_cash,
+        current_operating_cash=current_operating_cash,
+        previous_reserved_funds=month_open_reserved_funds,
+        current_reserved_funds=fondos_reservados_disponibles,
+    )
+    daily_reconciliation_status = compute_reconciliation_status(
+        daily_reconciliation["unexplained_gap"],
+        daily_liquidity,
+    )
+
+    reconciliation_card_style = ""
+    if daily_reconciliation_status["label"] == "Aceptable":
+        reconciliation_card_style = "background:rgba(22,163,74,.10); border-color:rgba(22,163,74,.24);"
+    elif daily_reconciliation_status["label"] == "Medio":
+        reconciliation_card_style = "background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.30);"
+    elif daily_reconciliation_status["label"] == "Riesgoso":
+        reconciliation_card_style = "background:rgba(220,38,38,.10); border-color:rgba(220,38,38,.25);"
+
+    unexplained_pct_text = (
+        "—"
+        if daily_reconciliation_status["pct"] is None
+        else f'{daily_reconciliation_status["pct"]:.1f}%'
+    )
 
     # La curva verde acumulada representa directamente la liquidez real
     # disponible contada al cierre del día.

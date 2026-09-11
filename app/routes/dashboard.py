@@ -277,9 +277,9 @@ def dashboard_finanzas():
 
     # Barras verdes: ingresos líquidos efectivamente registrados.
     # Barras rojas: gastos del mismo conjunto de días.
-    # Barra violeta: variación de la liquidez disponible respecto de la base
-    # real de apertura de cada mes. La liquidez esperada conserva su lógica
-    # diaria: cada cierre parte del saldo real de apertura de ese día.
+    # Barra violeta: resultado líquido económico del mes:
+    # ingresos líquidos efectivamente cobrados menos gastos pagados.
+    # No incluye variaciones de fondos reservados ni saldo anterior.
     monthly_liquid_income = [0.0] * 12
     monthly_liquid_expense = [0.0] * 12
     monthly_liquid_profit = [None] * 12
@@ -370,7 +370,10 @@ def dashboard_finanzas():
             running_reserved = current_reserved
 
         if monthly_liquid_days[month_index] > 0:
-            monthly_liquid_profit[month_index] = liquid_result_running
+            monthly_liquid_profit[month_index] = (
+                monthly_liquid_income[month_index]
+                - monthly_liquid_expense[month_index]
+            )
 
     # El gráfico arranca en el primer mes con carga líquida completa.
     # Para 2026, ese mes es junio.
@@ -671,18 +674,31 @@ def dashboard_finanzas():
     latest_calc_result = (
         cmp_calc_result_accum[-1] if cmp_calc_result_accum else 0.0
     )
+    # La serie/tabla líquida conserva la lógica comparable con el saldo real:
+    # incluye las altas/liberaciones de fondos reservados.
     latest_liquid_result = (
         cmp_liquid_result_accum[-1] if cmp_liquid_result_accum else 0.0
     )
+
+    # KPI económico de Ganancia Líquida: ingresos efectivamente cobrados menos
+    # gastos pagados del período. Las reservas son una reclasificación interna
+    # y no reducen esta ganancia. Se mantiene separado de la serie comparativa.
+    latest_liquid_kpi = (
+        float(ingresos_liquidos_acumulados or 0.0)
+        - float(expense or 0.0)
+    )
+
+    # La tarjeta de Ganancia Real Acumulada representa el saldo real vigente
+    # del último día efectivamente cargado, igual que la columna Saldo Real.
     latest_real_accum = next(
-        (value for value in reversed(cmp_real_result_accum) if value is not None),
+        (value for value in reversed(cmp_real_balance) if value is not None),
         None,
     )
 
     # Margen líquido: resultado líquido acumulado respecto de los ingresos
     # que efectivamente ingresaron como liquidez en el período.
     margen_liquido = (
-        latest_liquid_result / ingresos_liquidos_acumulados * 100.0
+        latest_liquid_kpi / ingresos_liquidos_acumulados * 100.0
         if ingresos_liquidos_acumulados
         else None
     )
@@ -801,7 +817,7 @@ def dashboard_finanzas():
 
     # Torta del período: ingreso efectivo, gasto y variación líquida acumulada
     # del mes, manteniendo la misma lógica del KPI superior.
-    liquid_profit_period = float(latest_liquid_result or 0.0)
+    liquid_profit_period = float(latest_liquid_kpi or 0.0)
 
     pie_labels = [
         "Ingresos líquidos",
@@ -978,14 +994,14 @@ def dashboard_finanzas():
         <div class="value">{ars(latest_calc_result)}</div>
         <div class="muted">
           Ventas menos gastos y menos {APPS_RETENTION_FACTOR * 100:.1f}% estimado
-          sobre ventas de PY + Rappi
+          sobre ventas de PY + Rappi. No incluye saldo anterior.
         </div>
       </div>
 
       <div class="card kpi" style="background:rgba(22,163,74,.17); border-color:rgba(22,163,74,.34);">
         <div class="label">Ganancia real acumulada</div>
         <div class="value">{ars(latest_real_accum) if latest_real_accum is not None else "—"}</div>
-        <div class="muted">Variación del saldo real disponible desde la apertura del mes</div>
+        <div class="muted">Saldo real disponible del último día cargado</div>
       </div>
 
       <!-- Fila 2 -->
@@ -1014,8 +1030,8 @@ def dashboard_finanzas():
 
       <div class="card kpi" style="background:rgba(124,58,237,.13); border-color:rgba(124,58,237,.30);">
         <div class="label">Ganancia líquida acumulada</div>
-        <div class="value">{ars(latest_liquid_result)}</div>
-        <div class="muted">Variación acumulada de liquidez disponible del mes</div>
+        <div class="value">{ars(latest_liquid_kpi)}</div>
+        <div class="muted">Ingresos efectivamente cobrados menos gastos pagados del período. No incluye saldo anterior.</div>
       </div>
 
       <div class="card kpi" style="background:rgba(244,63,94,.11); border-color:rgba(244,63,94,.27);">
@@ -1129,7 +1145,7 @@ def dashboard_finanzas():
       <div class="chartbox monthly-chartbox"><canvas id="monthlyBarChart"></canvas></div>
       <p class="muted" style="margin-top:10px;">
         Ingresos líquidos = Apps cobradas + Mercado Pago diario + efectivo retirado.
-        La barra violeta muestra la variación mensual de liquidez disponible e incluye altas o liberaciones de fondos reservados.
+        La barra violeta muestra la ganancia líquida del mes: ingresos líquidos menos gastos, sin saldo anterior ni variaciones de fondos reservados.
         El porcentaje sobre cada grupo representa ganancia líquida / ingresos líquidos.
       </p>
     </div>
