@@ -40,6 +40,12 @@ def home():
         <p class="muted">Descargar un respaldo completo y versionado de todos los datos.</p>
         <a class="btn primary" href="/backup">Entrar</a>
       </div>
+
+      <div class="card">
+        <h3>Informe Gerencial</h3>
+        <p class="muted">Generá informes ejecutivos por mes completo o período personalizado.</p>
+        <a class="btn primary" href="/informes/">Entrar</a>
+      </div>
     </div>
     """
     return _render_page(body, show_nav=True)

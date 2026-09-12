@@ -675,6 +675,7 @@ BASE_HTML = """
     <a href="{{ url_for('days_bp.list_days') }}">Días</a>
     <a href="{{ url_for('import_export_bp.import_balance_get') }}">Importar Balance</a>
     <a href="{{ url_for('backup_bp.backup_home') }}">Backup</a>
+    <a href="{{ url_for('reports_bp.index') }}">Informe Gerencial</a>
     <a href="{{ url_for('import_export_bp.export_get') }}">Exportar legacy</a>
     <a href="{{ url_for('auth_bp.logout') }}">Salir</a>
   </div>
@@ -729,6 +730,7 @@ from app.routes.io import io_bp
 from app.routes.import_export import import_export_bp
 from app.routes.backup import backup_bp
 from app.routes.caja_api import caja_api_bp
+from app.routes.reports import reports_bp
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(home_bp)
@@ -738,6 +740,7 @@ app.register_blueprint(io_bp)
 app.register_blueprint(import_export_bp)
 app.register_blueprint(backup_bp)
 app.register_blueprint(caja_api_bp)
+app.register_blueprint(reports_bp)
 
 with app.app_context():
     db.create_all()
