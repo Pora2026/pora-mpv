@@ -139,6 +139,8 @@ def compute_calc_liquid_reconciliation(
     current_operating_cash,
     previous_reserved_funds=0.0,
     current_reserved_funds=0.0,
+    bna_sales=None,
+    bna_accredited=None,
 ):
     """
     Concilia la brecha entre ganancia calculada y ganancia líquida.
@@ -169,6 +171,11 @@ def compute_calc_liquid_reconciliation(
     )
     apps_effect = compute_pending_net(apps_gross, apps_collected)
 
+    bna_complete = bna_sales is not None and bna_accredited is not None
+    bna_effect = (float(bna_sales) - float(bna_accredited)) if bna_complete else None
+    if bna_complete and (float(bna_sales) < 0 or float(bna_accredited) < 0):
+        raise ValueError("Los importes BNA no pueden ser negativos")
+
     complete = (
         calculated_profit is not None
         and liquid_profit is not None
@@ -187,6 +194,7 @@ def compute_calc_liquid_reconciliation(
             float(apps_effect)
             + float(operating_cash_change)
             + float(reserve_change)
+            + float(bna_effect or 0.0)
         )
         unexplained_gap = float(gap) - explained_gap
 
@@ -194,6 +202,7 @@ def compute_calc_liquid_reconciliation(
         "complete": complete,
         "gap": None if gap is None else round(gap, 2),
         "apps_effect": round(float(apps_effect), 2),
+        "bna_effect": None if bna_effect is None else round(bna_effect, 2),
         "operating_cash_change": (
             None
             if operating_cash_change is None

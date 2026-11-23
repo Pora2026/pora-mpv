@@ -50,6 +50,37 @@ class CajaApiSyncTests(unittest.TestCase):
             db.session.remove()
             db.drop_all()
 
+    def test_bna_sync_idempotent_and_does_not_double_count_income(self):
+        data = payload()
+        data["daily_bna"] = 12500
+        for _ in range(2):
+            response = self.client.put(
+                "/api/v1/caja/days/2026-08-20", json=data, headers=self.headers
+            )
+            self.assertIn(response.status_code, (200, 201))
+        with self.app.app_context():
+            day = BusinessDay.query.one()
+            self.assertEqual(day.daily_bna, 12500)
+            self.assertEqual(sum(s.income for s in day.shifts), 344667 + 432306)
+
+        # Un emisor anterior no debe borrar las ventas BNA ya importadas.
+        response = self.client.put(
+            "/api/v1/caja/days/2026-08-20", json=payload(), headers=self.headers
+        )
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            self.assertEqual(BusinessDay.query.one().daily_bna, 12500)
+
+    def test_rejects_negative_bna_without_writing(self):
+        data = payload()
+        data["daily_bna"] = -100
+        response = self.client.put(
+            "/api/v1/caja/days/2026-08-20", json=data, headers=self.headers
+        )
+        self.assertEqual(response.status_code, 400)
+        with self.app.app_context():
+            self.assertEqual(BusinessDay.query.count(), 0)
+
     def test_health_requires_valid_token(self):
         self.assertEqual(self.client.get("/api/v1/caja/health").status_code, 401)
         response = self.client.get("/api/v1/caja/health", headers=self.headers)

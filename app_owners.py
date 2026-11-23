@@ -21,8 +21,16 @@ from sqlalchemy import func, case, text
 from werkzeug.security import generate_password_hash
 
 from app.config import Config, INSTANCE_DIR
+from app.services.bna_schema import ensure_daily_bna_column
 from app.extensions import db, login_manager
 from app.models import User, BusinessDay, ShiftRecord, ExpenseCategory, ExpenseEntry
+from app.models.arandu import (
+    AranduAuditEvent,
+    AranduConversation,
+    AranduDocument,
+    AranduMessage,
+    AranduRule,
+)
 
 from app.utils.money import safe_float, ars
 from app.services.finance_service import (
@@ -135,6 +143,29 @@ def ensure_admin():
         db.session.commit()
 
 
+def ensure_arandu_users():
+    """Crea las cuentas separadas solo si sus contraseñas fueron configuradas."""
+
+    credentials = {
+        "Bernardo": os.environ.get("ARANDU_BERNARDO_PASSWORD"),
+        "Ximena": os.environ.get("ARANDU_XIMENA_PASSWORD"),
+    }
+    created = False
+    for username, password in credentials.items():
+        if not password or User.query.filter_by(username=username).first() is not None:
+            continue
+        db.session.add(
+            User(
+                username=username,
+                password_hash=generate_password_hash(password),
+                is_admin=False,
+            )
+        )
+        created = True
+    if created:
+        db.session.commit()
+
+
 def ensure_schema():
     dialect = db.engine.dialect.name
 
@@ -215,6 +246,10 @@ def ensure_schema():
 
             db.session.execute(text(
                 "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS daily_cash_withdrawn DOUBLE PRECISION;"
+            ))
+
+            db.session.execute(text(
+                "ALTER TABLE arandu_documents ADD COLUMN IF NOT EXISTS file_content BYTEA;"
             ))
 
             db.session.commit()
@@ -316,6 +351,15 @@ def ensure_schema():
         if "daily_cash_withdrawn" not in existing:
             db.session.execute(text(
                 "ALTER TABLE business_days ADD COLUMN daily_cash_withdrawn REAL;"
+            ))
+
+        arandu_document_cols = db.session.execute(
+            text("PRAGMA table_info(arandu_documents);")
+        ).fetchall()
+        arandu_document_existing = {c[1] for c in arandu_document_cols}
+        if "file_content" not in arandu_document_existing:
+            db.session.execute(text(
+                "ALTER TABLE arandu_documents ADD COLUMN file_content BLOB;"
             ))
 
         db.session.commit()
@@ -731,6 +775,7 @@ from app.routes.import_export import import_export_bp
 from app.routes.backup import backup_bp
 from app.routes.caja_api import caja_api_bp
 from app.routes.reports import reports_bp
+from app.routes.arandu import arandu_bp
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(home_bp)
@@ -741,11 +786,14 @@ app.register_blueprint(import_export_bp)
 app.register_blueprint(backup_bp)
 app.register_blueprint(caja_api_bp)
 app.register_blueprint(reports_bp)
+app.register_blueprint(arandu_bp)
 
 with app.app_context():
     db.create_all()
+    ensure_daily_bna_column(db.engine)
     ensure_schema()
     ensure_admin()
+    ensure_arandu_users()
 
 
 if __name__ == "__main__":
@@ -753,4 +801,5 @@ if __name__ == "__main__":
         db.create_all()
         ensure_schema()
         ensure_admin()
+        ensure_arandu_users()
     app.run(host="127.0.0.1", port=5001, debug=True)

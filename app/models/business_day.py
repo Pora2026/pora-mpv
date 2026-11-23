@@ -67,6 +67,9 @@ class BusinessDay(db.Model):
     # liquidez diaria consolidada
     daily_mercadopago = db.Column(db.Float, nullable=True)
 
+    # Ventas BNA incluidas en los ingresos de los turnos (no sumar otra vez).
+    daily_bna = db.Column(db.Float, nullable=True)
+
     # efectivo retirado desde CAJA
     daily_cash_withdrawn = db.Column(db.Float, nullable=True)
 

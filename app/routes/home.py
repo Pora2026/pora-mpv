@@ -46,6 +46,12 @@ def home():
         <p class="muted">Generá informes ejecutivos por mes completo o período personalizado.</p>
         <a class="btn primary" href="/informes/">Entrar</a>
       </div>
+
+      <div class="card">
+        <h3>Arandú</h3>
+        <p class="muted">CFO virtual consultivo, compartido y auditable.</p>
+        <a class="btn primary" href="/arandu/">Entrar</a>
+      </div>
     </div>
     """
     return _render_page(body, show_nav=True)

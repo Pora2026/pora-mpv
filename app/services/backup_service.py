@@ -45,7 +45,7 @@ from app.services.backup_schema import (
 )
 
 
-MAX_BACKUP_BYTES = 10 * 1024 * 1024
+MAX_BACKUP_BYTES = 100 * 1024 * 1024
 MAX_VALIDATION_ERRORS = 50
 PENDING_RESTORE_TTL_SECONDS = 24 * 60 * 60
 _RESTORE_TOKEN_PATTERN = re.compile(r"^[a-f0-9]{64}$")
@@ -547,6 +547,8 @@ def _validate_current_backup(payload: dict[str, Any]) -> dict[str, Any]:
 
     business_day_ids = table_ids.get("business_days", set())
     category_ids = table_ids.get("expense_categories", set())
+    user_ids = table_ids.get("users", set())
+    conversation_ids = table_ids.get("arandu_conversations", set())
 
     for index, row in enumerate(rows_by_table.get("shift_records", []), start=1):
         if isinstance(row, dict) and row.get("business_day_id") not in business_day_ids:
@@ -569,11 +571,42 @@ def _validate_current_backup(payload: dict[str, Any]) -> dict[str, Any]:
                 f"expense_entries[{index}] referencia un category_id inexistente.",
             )
 
+    for index, row in enumerate(rows_by_table.get("arandu_conversations", []), start=1):
+        if isinstance(row, dict) and row.get("created_by_user_id") not in user_ids:
+            _append_error(result, f"arandu_conversations[{index}] referencia un usuario inexistente.")
+
+    for index, row in enumerate(rows_by_table.get("arandu_messages", []), start=1):
+        if not isinstance(row, dict):
+            continue
+        if row.get("conversation_id") not in conversation_ids:
+            _append_error(result, f"arandu_messages[{index}] referencia una conversación inexistente.")
+        if row.get("user_id") is not None and row.get("user_id") not in user_ids:
+            _append_error(result, f"arandu_messages[{index}] referencia un usuario inexistente.")
+
+    for index, row in enumerate(rows_by_table.get("arandu_rules", []), start=1):
+        if not isinstance(row, dict):
+            continue
+        for field in ("proposed_by_user_id", "approved_by_user_id"):
+            if row.get(field) is not None and row.get(field) not in user_ids:
+                _append_error(result, f"arandu_rules[{index}].{field} referencia un usuario inexistente.")
+
+    for table_name in ("arandu_audit_events", "arandu_documents"):
+        for index, row in enumerate(rows_by_table.get(table_name, []), start=1):
+            if not isinstance(row, dict):
+                continue
+            user_field = "uploaded_by_user_id" if table_name == "arandu_documents" else "user_id"
+            if row.get(user_field) is not None and row.get(user_field) not in user_ids:
+                _append_error(result, f"{table_name}[{index}] referencia un usuario inexistente.")
+            if table_name == "arandu_audit_events" and row.get("conversation_id") is not None and row.get("conversation_id") not in conversation_ids:
+                _append_error(result, f"{table_name}[{index}] referencia una conversación inexistente.")
+
     unique_checks = [
         ("users", ("username",)),
         ("business_days", ("day",)),
         ("expense_categories", ("kind", "name")),
         ("shift_records", ("business_day_id", "shift")),
+        ("arandu_rules", ("rule_key",)),
+        ("arandu_documents", ("stored_name",)),
     ]
     for table_name, fields in unique_checks:
         seen: set[tuple[Any, ...]] = set()

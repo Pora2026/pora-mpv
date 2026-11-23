@@ -812,13 +812,19 @@ def edit_day(day):
       </div>
 
       <div class="kpi" style="padding:14px; {reconciliation_card_style}">
-        <div class="label">Desfase no explicado</div>
+        <div class="label">Residuo de conciliación</div>
         <div class="value">{ars(daily_reconciliation["unexplained_gap"]) if daily_reconciliation["unexplained_gap"] is not None else "—"}</div>
         <div class="muted" style="display:flex; gap:7px; align-items:center; flex-wrap:wrap;">
           <span class="{daily_reconciliation_status['class']}">{daily_reconciliation_status['label']}</span>
-          <span>{unexplained_pct_text} de la liquidez ingresada</span>
+          <span>{unexplained_pct_text} de la liquidez ingresada · control algebraico, no conciliación de tesorería</span>
         </div>
       </div>
+    </div>
+    <div class="kpi" style="padding:14px; margin-top:12px; border:1px solid rgba(107,114,128,.25);">
+      <div class="label">Control independiente de saldo disponible (día seleccionado)</div>
+      <div class="value">{ars(real_cash_difference) if getattr(bday, "actual_cash_balance", None) is not None and getattr(bday, "opening_cash_balance", None) is not None else "Sin datos suficientes"}</div>
+      <div class="muted">Esperado: {ars(expected_cash) if getattr(bday, "opening_cash_balance", None) is not None else "—"} · Real declarado: {ars(bday.actual_cash_balance) if bday.actual_cash_balance is not None else "—"}</div>
+      <div class="muted">Diferencia real − esperada. Control del saldo disponible registrado, no conciliación integral de bancos ni clasificación de causas. No incluye ventas BNA pendientes.</div>
     </div>
     """
     return render_page(body, show_nav=True)

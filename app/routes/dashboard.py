@@ -1075,11 +1075,11 @@ def dashboard_finanzas():
       </div>
 
       <div class="card kpi" style="{accumulated_reconciliation_style}">
-        <div class="label">Desfase no explicado acumulado</div>
+        <div class="label">Residuo de conciliación</div>
         <div class="value">{ars(accumulated_reconciliation["unexplained_gap"]) if accumulated_reconciliation["unexplained_gap"] is not None else "—"}</div>
         <div class="muted" style="display:flex; gap:7px; align-items:center; flex-wrap:wrap;">
           <span class="{accumulated_reconciliation_status['class']}">{accumulated_reconciliation_status['label']}</span>
-          <span>{accumulated_unexplained_pct_text} de los ingresos líquidos</span>
+          <span>{accumulated_unexplained_pct_text} de los ingresos líquidos · control algebraico</span>
         </div>
       </div>
     </div>

@@ -87,6 +87,10 @@ def validate_day_snapshot(path_day: str, payload: dict, *, start_date="2026-08-1
         "daily_mercadopago": _number(
             payload.get("daily_mercadopago"), "daily_mercadopago"
         ),
+        "daily_bna": (
+            _number(payload["daily_bna"], "daily_bna")
+            if "daily_bna" in payload else None
+        ),
         "daily_cash_withdrawn": _number(
             payload.get("daily_cash_withdrawn"), "daily_cash_withdrawn"
         ),
@@ -94,6 +98,9 @@ def validate_day_snapshot(path_day: str, payload: dict, *, start_date="2026-08-1
             payload.get("operating_cash_balance"), "operating_cash_balance"
         ),
     }
+
+    if normalized["daily_bna"] is not None and normalized["daily_bna"] < 0:
+        raise CajaSyncValidationError("daily_bna no puede ser negativo.")
 
     return parsed_day, normalized
 
@@ -105,6 +112,7 @@ def apply_day_snapshot(path_day: str, payload: dict, *, start_date="2026-08-13")
       - ingreso Mañana / Tarde;
       - apps pendientes;
       - Mercado Pago diario;
+      - ventas BNA (si CAJA informa daily_bna);
       - efectivo retirado;
       - caja operativa al cierre.
 
@@ -138,6 +146,9 @@ def apply_day_snapshot(path_day: str, payload: dict, *, start_date="2026-08-13")
 
     bday.real_apps_pending = data["real_apps_pending"]
     bday.daily_mercadopago = data["daily_mercadopago"]
+    # Un emisor antiguo puede omitir el campo: no borrar el valor ya importado.
+    if data["daily_bna"] is not None:
+        bday.daily_bna = data["daily_bna"]
     bday.daily_cash_withdrawn = data["daily_cash_withdrawn"]
     bday.operating_cash_balance = data["operating_cash_balance"]
     bday.status = "complete"

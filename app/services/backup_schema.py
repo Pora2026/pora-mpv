@@ -4,10 +4,17 @@ from collections import OrderedDict
 
 from app.extensions import db
 from app.models import BusinessDay, ExpenseCategory, ExpenseEntry, ShiftRecord, User
+from app.models.arandu import (
+    AranduAuditEvent,
+    AranduConversation,
+    AranduDocument,
+    AranduMessage,
+    AranduRule,
+)
 
 
 BACKUP_FORMAT = "pora-caja-backup"
-CURRENT_FORMAT_VERSION = 3
+CURRENT_FORMAT_VERSION = 6
 
 # Registro explícito de las tablas que forman parte del backup.
 # El orden también será útil para una futura restauración.
@@ -18,6 +25,11 @@ BACKUP_MODELS = OrderedDict(
         ("business_days", BusinessDay),
         ("shift_records", ShiftRecord),
         ("expense_entries", ExpenseEntry),
+        ("arandu_conversations", AranduConversation),
+        ("arandu_messages", AranduMessage),
+        ("arandu_rules", AranduRule),
+        ("arandu_audit_events", AranduAuditEvent),
+        ("arandu_documents", AranduDocument),
     ]
 )
 

@@ -132,9 +132,113 @@ def _migrate_v2_to_v3(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v3_to_v4(payload: dict[str, Any]) -> dict[str, Any]:
+    """Agrega las tablas iniciales de Arandú vacías a backups anteriores."""
+
+    tables = payload.get("tables")
+    manifest = payload.get("manifest")
+    if not isinstance(tables, dict) or not isinstance(manifest, dict):
+        raise BackupMigrationError("El backup v3 no tiene la estructura esperada.")
+
+    manifest_tables = manifest.get("tables")
+    if not isinstance(manifest_tables, dict):
+        raise BackupMigrationError("El backup v3 no contiene manifest.tables válido.")
+
+    new_tables = {
+        "arandu_conversations": [
+            "id", "title", "created_by_user_id", "status", "created_at", "updated_at"
+        ],
+        "arandu_messages": [
+            "id", "conversation_id", "user_id", "role", "content", "created_at"
+        ],
+        "arandu_rules": [
+            "id", "rule_key", "title", "content", "status", "version",
+            "proposed_by_user_id", "approved_by_user_id", "created_at", "approved_at"
+        ],
+        "arandu_audit_events": [
+            "id", "conversation_id", "user_id", "event_type", "payload_json", "created_at"
+        ],
+    }
+    for table_name, columns in new_tables.items():
+        tables.setdefault(table_name, [])
+        manifest_tables.setdefault(
+            table_name, {"row_count": 0, "columns": columns}
+        )
+
+    manifest["total_rows"] = sum(
+        item.get("row_count", 0)
+        for item in manifest_tables.values()
+        if isinstance(item, dict)
+    )
+    _recompute_content_checksum(payload)
+    return payload
+
+
+def _migrate_v4_to_v5(payload: dict[str, Any]) -> dict[str, Any]:
+    """Agrega el registro de documentos de Arandú a backups anteriores."""
+
+    tables = payload.get("tables")
+    manifest = payload.get("manifest")
+    if not isinstance(tables, dict) or not isinstance(manifest, dict):
+        raise BackupMigrationError("El backup v4 no tiene la estructura esperada.")
+    manifest_tables = manifest.get("tables")
+    if not isinstance(manifest_tables, dict):
+        raise BackupMigrationError("El backup v4 no contiene manifest.tables válido.")
+
+    table_name = "arandu_documents"
+    columns = [
+        "id", "original_name", "stored_name", "mime_type", "size_bytes",
+        "sha256", "uploaded_by_user_id", "status", "extracted_text", "file_content",
+        "created_at",
+    ]
+    tables.setdefault(table_name, [])
+    manifest_tables.setdefault(table_name, {"row_count": 0, "columns": columns})
+    manifest["total_rows"] = sum(
+        item.get("row_count", 0)
+        for item in manifest_tables.values()
+        if isinstance(item, dict)
+    )
+    _recompute_content_checksum(payload)
+    return payload
+
+
+def _migrate_v5_to_v6(payload: dict[str, Any]) -> dict[str, Any]:
+    """Incorpora daily_bna sin alterar ventas ni datos historicos."""
+    tables = payload.get("tables")
+    manifest = payload.get("manifest")
+    if not isinstance(tables, dict) or not isinstance(manifest, dict):
+        raise BackupMigrationError("El backup v5 no tiene la estructura esperada.")
+    rows = tables.get("business_days")
+    manifest_tables = manifest.get("tables")
+    if not isinstance(rows, list) or not isinstance(manifest_tables, dict):
+        raise BackupMigrationError("Falta business_days en el backup.")
+    meta = manifest_tables.get("business_days")
+    if not isinstance(meta, dict):
+        raise BackupMigrationError("Falta el manifiesto de business_days.")
+    columns = meta.get("columns")
+    if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
+        raise BackupMigrationError("Columnas de business_days invalidas.")
+    for row in rows:
+        if not isinstance(row, dict):
+            raise BackupMigrationError("Registro business_days invalido.")
+        row.setdefault("daily_bna", None)
+    # El validador exige el mismo orden que el modelo SQLAlchemy.
+    # daily_bna se declara inmediatamente despues de daily_mercadopago.
+    if "daily_bna" in columns:
+        columns.remove("daily_bna")
+    if "daily_mercadopago" not in columns:
+        raise BackupMigrationError("Falta daily_mercadopago en el manifiesto de business_days.")
+    columns.insert(columns.index("daily_mercadopago") + 1, "daily_bna")
+    _recompute_content_checksum(payload)
+    return payload
+
+
 MIGRATIONS: dict[int, MigrationFunction] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
+    3: _migrate_v3_to_v4,
+    4: _migrate_v4_to_v5,
+    5: _migrate_v5_to_v6,
 }
 
 

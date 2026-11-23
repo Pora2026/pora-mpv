@@ -6,3 +6,6 @@ gunicorn
 psycopg2-binary
 
 reportlab>=4.0
+openai>=1.0
+pypdf>=5.0
+python-docx>=1.1
