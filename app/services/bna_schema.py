@@ -22,3 +22,21 @@ def ensure_daily_bna_column(engine):
         else:
             raise RuntimeError(f"Motor de base de datos no soportado: {dialect}")
     return True
+
+
+def ensure_bna_accreditation_column(engine):
+    """Agrega el importe diario confirmado sin alterar registros históricos."""
+    with engine.begin() as connection:
+        if not inspect(connection).has_table("business_days"):
+            raise RuntimeError("No existe business_days")
+        names = {c["name"] for c in inspect(connection).get_columns("business_days")}
+        if "daily_bna_accredited" in names:
+            return False
+        if connection.dialect.name == "postgresql":
+            sql = "ALTER TABLE business_days ADD COLUMN IF NOT EXISTS daily_bna_accredited DOUBLE PRECISION"
+        elif connection.dialect.name == "sqlite":
+            sql = "ALTER TABLE business_days ADD COLUMN daily_bna_accredited REAL"
+        else:
+            raise RuntimeError("Motor no soportado")
+        connection.execute(text(sql))
+    return True

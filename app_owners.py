@@ -21,7 +21,7 @@ from sqlalchemy import func, case, text
 from werkzeug.security import generate_password_hash
 
 from app.config import Config, INSTANCE_DIR
-from app.services.bna_schema import ensure_daily_bna_column
+from app.services.bna_schema import ensure_daily_bna_column, ensure_bna_accreditation_column
 from app.extensions import db, login_manager
 from app.models import User, BusinessDay, ShiftRecord, ExpenseCategory, ExpenseEntry
 from app.models.arandu import (
@@ -791,6 +791,7 @@ app.register_blueprint(arandu_bp)
 with app.app_context():
     db.create_all()
     ensure_daily_bna_column(db.engine)
+    ensure_bna_accreditation_column(db.engine)
     ensure_schema()
     ensure_admin()
     ensure_arandu_users()

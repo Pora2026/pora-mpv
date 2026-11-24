@@ -233,12 +233,26 @@ def _migrate_v5_to_v6(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _migrate_v6_to_v7(payload: dict[str, Any]) -> dict[str, Any]:
+    """Agrega acreditaciones BNA vacías a respaldos anteriores."""
+    rows = payload["tables"]["business_days"]
+    columns = payload["manifest"]["tables"]["business_days"]["columns"]
+    for row in rows:
+        row.setdefault("daily_bna_accredited", None)
+    if "daily_bna_accredited" in columns:
+        columns.remove("daily_bna_accredited")
+    columns.insert(columns.index("daily_bna") + 1, "daily_bna_accredited")
+    _recompute_content_checksum(payload)
+    return payload
+
+
 MIGRATIONS: dict[int, MigrationFunction] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
     3: _migrate_v3_to_v4,
     4: _migrate_v4_to_v5,
     5: _migrate_v5_to_v6,
+    6: _migrate_v6_to_v7,
 }
 
 

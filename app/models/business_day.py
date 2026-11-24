@@ -70,6 +70,9 @@ class BusinessDay(db.Model):
     # Ventas BNA incluidas en los ingresos de los turnos (no sumar otra vez).
     daily_bna = db.Column(db.Float, nullable=True)
 
+    # Depósitos BNA efectivamente confirmados en esta fecha (no estimaciones).
+    daily_bna_accredited = db.Column(db.Float, nullable=True)
+
     # efectivo retirado desde CAJA
     daily_cash_withdrawn = db.Column(db.Float, nullable=True)
 

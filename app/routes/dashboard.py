@@ -339,6 +339,7 @@ def dashboard_finanzas():
                 float(getattr(b, "daily_mercadopago", 0.0) or 0.0)
                 + float(getattr(b, "daily_cash_withdrawn", 0.0) or 0.0)
                 + float(getattr(b, "real_apps_collected", 0.0) or 0.0)
+                + float(getattr(b, "daily_bna_accredited", 0.0) or 0.0)
             )
             expense_day = float(item["expense_total"] or 0.0)
 
@@ -346,6 +347,7 @@ def dashboard_finanzas():
                 getattr(b, "daily_mercadopago", None) is not None
                 or getattr(b, "daily_cash_withdrawn", None) is not None
                 or getattr(b, "real_apps_collected", None) is not None
+                or getattr(b, "daily_bna_accredited", None) is not None
             )
             has_liquid_activity = (
                 has_liquid_data
@@ -442,6 +444,7 @@ def dashboard_finanzas():
         float(getattr(b, "daily_mercadopago", 0.0) or 0.0)
         + float(getattr(b, "daily_cash_withdrawn", 0.0) or 0.0)
         + float(getattr(b, "real_apps_collected", 0.0) or 0.0)
+        + float(getattr(b, "daily_bna_accredited", 0.0) or 0.0)
         for b in bdays
         if not is_sunday(b.day)
     )
@@ -543,6 +546,7 @@ def dashboard_finanzas():
                 float(getattr(b, "daily_mercadopago", 0.0) or 0.0)
                 + float(getattr(b, "daily_cash_withdrawn", 0.0) or 0.0)
                 + float(getattr(b, "real_apps_collected", 0.0) or 0.0)
+                + float(getattr(b, "daily_bna_accredited", 0.0) or 0.0)
             )
 
             explicit_reserved = getattr(b, "reserved_funds_balance", None)
@@ -555,6 +559,7 @@ def dashboard_finanzas():
                 getattr(b, "daily_mercadopago", None) is not None
                 or getattr(b, "daily_cash_withdrawn", None) is not None
                 or getattr(b, "real_apps_collected", None) is not None
+                or getattr(b, "daily_bna_accredited", None) is not None
                 or explicit_reserved is not None
                 or abs(expense_day) > 1e-9
             )
@@ -727,6 +732,8 @@ def dashboard_finanzas():
     reconciliation_active_days = []
     reconciliation_apps_gross = 0.0
     reconciliation_apps_collected = 0.0
+    reconciliation_bna_sales = 0.0
+    reconciliation_bna_accredited = 0.0
     reconciliation_liquid_reference = 0.0
 
     for reconciliation_day in reconciliation_days:
@@ -746,6 +753,8 @@ def dashboard_finanzas():
             or getattr(reconciliation_day, "daily_mercadopago", None) is not None
             or getattr(reconciliation_day, "daily_cash_withdrawn", None) is not None
             or getattr(reconciliation_day, "real_apps_collected", None) is not None
+            or getattr(reconciliation_day, "daily_bna", None) is not None
+            or getattr(reconciliation_day, "daily_bna_accredited", None) is not None
             or getattr(reconciliation_day, "reserved_funds_balance", None) is not None
             or getattr(reconciliation_day, "actual_cash_balance", None) is not None
         )
@@ -759,10 +768,13 @@ def dashboard_finanzas():
         reconciliation_apps_collected += float(
             getattr(reconciliation_day, "real_apps_collected", 0.0) or 0.0
         )
+        reconciliation_bna_sales += float(getattr(reconciliation_day, "daily_bna", 0.0) or 0.0)
+        reconciliation_bna_accredited += float(getattr(reconciliation_day, "daily_bna_accredited", 0.0) or 0.0)
         reconciliation_liquid_reference += (
             float(getattr(reconciliation_day, "daily_mercadopago", 0.0) or 0.0)
             + float(getattr(reconciliation_day, "daily_cash_withdrawn", 0.0) or 0.0)
             + float(getattr(reconciliation_day, "real_apps_collected", 0.0) or 0.0)
+            + float(getattr(reconciliation_day, "daily_bna_accredited", 0.0) or 0.0)
         )
 
     previous_operating_day = (
@@ -791,6 +803,8 @@ def dashboard_finanzas():
         liquid_profit=latest_liquid_result,
         apps_gross=reconciliation_apps_gross,
         apps_collected=reconciliation_apps_collected,
+        bna_sales=reconciliation_bna_sales,
+        bna_accredited=reconciliation_bna_accredited,
         previous_operating_cash=opening_operating_cash,
         current_operating_cash=latest_operating_cash,
         previous_reserved_funds=opening_reserved_funds_reconciliation,
@@ -1070,7 +1084,8 @@ def dashboard_finanzas():
         <div class="muted">
           Apps: {ars(accumulated_reconciliation["apps_effect"])} ·
           Caja: {ars(accumulated_reconciliation["operating_cash_change"]) if accumulated_reconciliation["operating_cash_change"] is not None else "—"} ·
-          Reservas: {ars(accumulated_reconciliation["reserve_change"])}
+          Reservas: {ars(accumulated_reconciliation["reserve_change"])} ·
+          BNA: {ars(accumulated_reconciliation["bna_effect"] or 0.0)}
         </div>
       </div>
 

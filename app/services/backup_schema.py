@@ -14,7 +14,7 @@ from app.models.arandu import (
 
 
 BACKUP_FORMAT = "pora-caja-backup"
-CURRENT_FORMAT_VERSION = 6
+CURRENT_FORMAT_VERSION = 7
 
 # Registro explícito de las tablas que forman parte del backup.
 # El orden también será útil para una futura restauración.

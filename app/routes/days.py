@@ -37,6 +37,7 @@ def _daily_liquidity(bday):
         float(getattr(bday, "daily_mercadopago", 0.0) or 0.0)
         + float(getattr(bday, "daily_cash_withdrawn", 0.0) or 0.0)
         + float(getattr(bday, "real_apps_collected", 0.0) or 0.0)
+        + float(getattr(bday, "daily_bna_accredited", 0.0) or 0.0)
     )
 
 
@@ -378,6 +379,8 @@ def edit_day(day):
 
     apps_gross_acumulado = 0.0
     apps_collected_acumulado = 0.0
+    bna_sales_acumulado = 0.0
+    bna_accredited_acumulado = 0.0
 
     for dia_periodo in period_days:
         if is_sunday(dia_periodo.day):
@@ -395,6 +398,8 @@ def edit_day(day):
         apps_collected_acumulado += float(
             getattr(dia_periodo, "real_apps_collected", 0.0) or 0.0
         )
+        bna_sales_acumulado += float(getattr(dia_periodo, "daily_bna", 0.0) or 0.0)
+        bna_accredited_acumulado += float(getattr(dia_periodo, "daily_bna_accredited", 0.0) or 0.0)
 
         has_calc_data = (
             abs(float(totales_periodo["income"] or 0.0)) > 1e-9
@@ -419,6 +424,7 @@ def edit_day(day):
             float(getattr(dia_periodo, "daily_mercadopago", 0.0) or 0.0)
             + float(getattr(dia_periodo, "daily_cash_withdrawn", 0.0) or 0.0)
             + float(getattr(dia_periodo, "real_apps_collected", 0.0) or 0.0)
+            + float(getattr(dia_periodo, "daily_bna_accredited", 0.0) or 0.0)
         )
 
         explicit_reserved = getattr(
@@ -435,6 +441,7 @@ def edit_day(day):
             getattr(dia_periodo, "daily_mercadopago", None) is not None
             or getattr(dia_periodo, "daily_cash_withdrawn", None) is not None
             or getattr(dia_periodo, "real_apps_collected", None) is not None
+            or getattr(dia_periodo, "daily_bna_accredited", None) is not None
             or explicit_reserved is not None
             or abs(expense_periodo) > 1e-9
         )
@@ -469,6 +476,8 @@ def edit_day(day):
         liquid_profit=ganancia_liquida_acumulada,
         apps_gross=apps_gross_acumulado,
         apps_collected=apps_collected_acumulado,
+        bna_sales=bna_sales_acumulado,
+        bna_accredited=bna_accredited_acumulado,
         previous_operating_cash=month_open_operating_cash,
         current_operating_cash=current_operating_cash,
         previous_reserved_funds=month_open_reserved_funds,
@@ -577,6 +586,21 @@ def edit_day(day):
               <input name="real_apps_collected" value="{_money_input(getattr(bday, 'real_apps_collected', None))}" placeholder="Ej: 120000" />
             </div>
             
+            <div>
+              <label>Ventas BNA (informadas por CAJA)</label>
+              <input value="{_money_input(getattr(bday, 'daily_bna', None))}" readonly
+                     style="background:#f3f4f6;" placeholder="Pendiente de sincronización" />
+              <div class="muted">Incluidas en ingresos de turnos; no se suman nuevamente.</div>
+            </div>
+
+            <div>
+              <label>Acreditación BNA confirmada (fecha de este día)</label>
+              <input name="daily_bna_accredited" type="number" step="0.01" min="0"
+                     value="{_money_input(getattr(bday, 'daily_bna_accredited', None))}"
+                     placeholder="Ej: 150000" />
+              <div class="muted">Sólo depósitos verificados en el banco; no usar fechas previstas.</div>
+            </div>
+
             <div>
               <label>Mercado Pago diario</label>
               <input name="daily_mercadopago"
@@ -807,7 +831,8 @@ def edit_day(day):
         <div class="muted">
           Apps: {ars(daily_reconciliation["apps_effect"])} ·
           Caja: {ars(daily_reconciliation["operating_cash_change"]) if daily_reconciliation["operating_cash_change"] is not None else "—"} ·
-          Reservas: {ars(daily_reconciliation["reserve_change"])}
+          Reservas: {ars(daily_reconciliation["reserve_change"])} ·
+          BNA: {ars(daily_reconciliation["bna_effect"]) if daily_reconciliation["bna_effect"] is not None else "—"}
         </div>
       </div>
 
@@ -845,6 +870,17 @@ def save_day(day):
         flash("Día no encontrado.", "error")
         return redirect(url_for("days_bp.list_days"))
 
+    # Validar antes de modificar el día; evitar depósitos ficticios o duplicados.
+    credit_raw = (request.form.get("daily_bna_accredited") or "").strip()
+    from math import isfinite
+    try:
+        credit = None if not credit_raw else float(credit_raw.replace(",", "."))
+        if credit is not None and (not isfinite(credit) or credit < 0):
+            raise ValueError
+    except ValueError:
+        flash("La acreditación BNA debe ser un importe válido no negativo.", "error")
+        return redirect(url_for("days_bp.edit_day", day=day))
+    bday.daily_bna_accredited = credit
     bday.note = (request.form.get("note") or "").strip()
     ensure_shifts(bday)
 
