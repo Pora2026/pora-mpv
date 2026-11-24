@@ -483,23 +483,38 @@ def edit_day(day):
         previous_reserved_funds=month_open_reserved_funds,
         current_reserved_funds=fondos_reservados_disponibles,
     )
-    daily_reconciliation_status = compute_reconciliation_status(
-        daily_reconciliation["unexplained_gap"],
-        daily_liquidity,
+    # Control independiente: el residuo calculada vs. liquida puede
+    # ser casi cero por construccion y no representa un arqueo real.
+    has_independent_balance = (
+        getattr(bday, "opening_cash_balance", None) is not None
+        and getattr(bday, "actual_cash_balance", None) is not None
+    )
+    unexplained_cash_difference = (
+        real_cash_difference if has_independent_balance else None
     )
 
-    reconciliation_card_style = ""
-    if daily_reconciliation_status["label"] == "Aceptable":
-        reconciliation_card_style = "background:rgba(22,163,74,.10); border-color:rgba(22,163,74,.24);"
-    elif daily_reconciliation_status["label"] == "Medio":
-        reconciliation_card_style = "background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.30);"
-    elif daily_reconciliation_status["label"] == "Riesgoso":
-        reconciliation_card_style = "background:rgba(220,38,38,.10); border-color:rgba(220,38,38,.25);"
-
-    unexplained_pct_text = (
-        "—"
-        if daily_reconciliation_status["pct"] is None
-        else f'{daily_reconciliation_status["pct"]:.1f}%'
+    # Semaforo sobre la magnitud de la diferencia, relativa al saldo esperado.
+    # Si la base es cero o negativa no se asigna color para evitar falsas alertas.
+    unexplained_pct = (
+        abs(unexplained_cash_difference) / expected_cash * 100.0
+        if unexplained_cash_difference is not None and expected_cash > 0
+        else None
+    )
+    if unexplained_pct is None:
+        unexplained_card_style = "background:rgba(107,114,128,.08); border:1px solid rgba(107,114,128,.20);"
+        unexplained_status = "Sin referencia"
+    elif unexplained_pct <= 1.0:
+        unexplained_card_style = "background:rgba(22,163,74,.10); border:1px solid rgba(22,163,74,.24);"
+        unexplained_status = "Aceptable"
+    elif unexplained_pct <= 5.0:
+        unexplained_card_style = "background:rgba(245,158,11,.12); border:1px solid rgba(245,158,11,.30);"
+        unexplained_status = "Atencion"
+    else:
+        unexplained_card_style = "background:rgba(220,38,38,.14); border:1px solid rgba(220,38,38,.45);"
+        unexplained_status = "Critico"
+    unexplained_status_text = (
+        f"{unexplained_status} · {unexplained_pct:.2f}% del saldo esperado"
+        if unexplained_pct is not None else unexplained_status
     )
 
     # La curva verde acumulada representa directamente la liquidez real
@@ -836,20 +851,14 @@ def edit_day(day):
         </div>
       </div>
 
-      <div class="kpi" style="padding:14px; {reconciliation_card_style}">
-        <div class="label">Residuo de conciliación</div>
-        <div class="value">{ars(daily_reconciliation["unexplained_gap"]) if daily_reconciliation["unexplained_gap"] is not None else "—"}</div>
-        <div class="muted" style="display:flex; gap:7px; align-items:center; flex-wrap:wrap;">
-          <span class="{daily_reconciliation_status['class']}">{daily_reconciliation_status['label']}</span>
-          <span>{unexplained_pct_text} de la liquidez ingresada · control algebraico, no conciliación de tesorería</span>
+      <div class="kpi" style="padding:14px; {unexplained_card_style}">
+        <div class="label">Diferencia sin explicar</div>
+        <div class="value">{ars(unexplained_cash_difference) if unexplained_cash_difference is not None else "Sin datos"}</div>
+        <div class="muted" style="font-weight:700;">{unexplained_status_text}</div>
+        <div class="muted">
+          {f"Esperado: {ars(expected_cash)} · Real: {ars(bday.actual_cash_balance)}" if has_independent_balance else "Falta saldo de apertura o saldo real declarado"}
         </div>
       </div>
-    </div>
-    <div class="kpi" style="padding:14px; margin-top:12px; border:1px solid rgba(107,114,128,.25);">
-      <div class="label">Control independiente de saldo disponible (día seleccionado)</div>
-      <div class="value">{ars(real_cash_difference) if getattr(bday, "actual_cash_balance", None) is not None and getattr(bday, "opening_cash_balance", None) is not None else "Sin datos suficientes"}</div>
-      <div class="muted">Esperado: {ars(expected_cash) if getattr(bday, "opening_cash_balance", None) is not None else "—"} · Real declarado: {ars(bday.actual_cash_balance) if bday.actual_cash_balance is not None else "—"}</div>
-      <div class="muted">Diferencia real − esperada. Control del saldo disponible registrado, no conciliación integral de bancos ni clasificación de causas. No incluye ventas BNA pendientes.</div>
     </div>
     """
     return render_page(body, show_nav=True)
