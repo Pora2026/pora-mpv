@@ -488,6 +488,7 @@ def dashboard_finanzas():
     liquid_result_running = 0.0
     running_reserved_funds = 0.0
     first_visible_month_point = True
+    latest_independent_close = None
 
     for d in chart_days:
         month_key = (d.year, d.month)
@@ -595,6 +596,25 @@ def dashboard_finanzas():
             if actual_balance is not None:
                 real_balance = float(actual_balance)
                 real_result_running = real_balance - month_base_real
+
+                # Misma formula que la tarjeta de Dias, ultimo cierre real.
+                if (
+                    d1 <= d <= d2
+                    and getattr(b, "opening_cash_balance", None) is not None
+                ):
+                    expected_day = compute_expected_cash_balance(
+                        opening_balance=b.opening_cash_balance,
+                        cash_income=daily_liquidity,
+                        paid_expenses=expense_day,
+                        reserved_funds_change=(
+                            current_reserved_funds - running_reserved_funds
+                        ),
+                    )
+                    latest_independent_close = {
+                        "date": d,
+                        "real": real_balance,
+                        "expected": expected_day,
+                    }
 
             reserve_marker = (
                 current_reserved_funds
@@ -810,24 +830,31 @@ def dashboard_finanzas():
         previous_reserved_funds=opening_reserved_funds_reconciliation,
         current_reserved_funds=latest_reserved_funds,
     )
-    accumulated_reconciliation_status = compute_reconciliation_status(
-        accumulated_reconciliation["unexplained_gap"],
-        reconciliation_liquid_reference,
+    # Misma diferencia de saldo que en Dias, tomada del ultimo cierre real
+    # dentro del filtro. No sumar diferencias diarias.
+    accumulated_unexplained = None
+    accumulated_unexplained_pct = None
+    accumulated_unexplained_label = "Sin datos"
+    accumulated_reconciliation_style = (
+        "background:rgba(107,114,128,.08); border-color:rgba(107,114,128,.20);"
     )
-
-    accumulated_reconciliation_style = ""
-    if accumulated_reconciliation_status["label"] == "Aceptable":
-        accumulated_reconciliation_style = "background:rgba(22,163,74,.10); border-color:rgba(22,163,74,.24);"
-    elif accumulated_reconciliation_status["label"] == "Medio":
-        accumulated_reconciliation_style = "background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.30);"
-    elif accumulated_reconciliation_status["label"] == "Riesgoso":
-        accumulated_reconciliation_style = "background:rgba(220,38,38,.10); border-color:rgba(220,38,38,.25);"
-
-    accumulated_unexplained_pct_text = (
-        "—"
-        if accumulated_reconciliation_status["pct"] is None
-        else f'{accumulated_reconciliation_status["pct"]:.1f}%'
-    )
+    if latest_independent_close is not None:
+        expected_close = latest_independent_close["expected"]
+        actual_close = latest_independent_close["real"]
+        accumulated_unexplained = actual_close - expected_close
+        if expected_close > 0:
+            accumulated_unexplained_pct = abs(accumulated_unexplained) / expected_close * 100
+            if accumulated_unexplained_pct <= 1:
+                accumulated_unexplained_label = "Aceptable"
+                accumulated_reconciliation_style = "background:rgba(22,163,74,.10); border-color:rgba(22,163,74,.24);"
+            elif accumulated_unexplained_pct <= 5:
+                accumulated_unexplained_label = "Atención"
+                accumulated_reconciliation_style = "background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.30);"
+            else:
+                accumulated_unexplained_label = "Crítico"
+                accumulated_reconciliation_style = "background:rgba(220,38,38,.14); border-color:rgba(220,38,38,.45);"
+        else:
+            accumulated_unexplained_label = "Sin referencia"
 
     # Torta del período: ingreso efectivo, gasto y variación líquida acumulada
     # del mes, manteniendo la misma lógica del KPI superior.
@@ -1090,12 +1117,10 @@ def dashboard_finanzas():
       </div>
 
       <div class="card kpi" style="{accumulated_reconciliation_style}">
-        <div class="label">Residuo de conciliación</div>
-        <div class="value">{ars(accumulated_reconciliation["unexplained_gap"]) if accumulated_reconciliation["unexplained_gap"] is not None else "—"}</div>
-        <div class="muted" style="display:flex; gap:7px; align-items:center; flex-wrap:wrap;">
-          <span class="{accumulated_reconciliation_status['class']}">{accumulated_reconciliation_status['label']}</span>
-          <span>{accumulated_unexplained_pct_text} de los ingresos líquidos · control algebraico</span>
-        </div>
+        <div class="label">Diferencia sin explicar</div>
+        <div class="value">{ars(accumulated_unexplained) if accumulated_unexplained is not None else "Sin datos"}</div>
+        <div class="muted">{accumulated_unexplained_label}{f" · {accumulated_unexplained_pct:.2f}% del saldo esperado" if accumulated_unexplained_pct is not None else ""}</div>
+        <div class="muted">{f"Cierre: {fmt_date_ar(latest_independent_close['date'])} · Esperado: {ars(latest_independent_close['expected'])} · Real: {ars(latest_independent_close['real'])}" if latest_independent_close is not None else "Falta saldo real o base de apertura"}</div>
       </div>
     </div>
 
